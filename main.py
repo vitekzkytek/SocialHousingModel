@@ -139,7 +139,7 @@ def generate_interventions(
     return interventions
 
 
-def generate_hhs_stats(hhs, interventions, private_years_of_support, municipal_years_of_support, apartment_cost):
+def generate_hhs_stats(hhs, interventions, private_years_of_support, municipal_years_of_support, private_apartment_cost, municipal_apartment_cost):
     def hhs_stats(hhs,interventions,hh_type,private_years_of_support,municipal_years_of_support):
         total_cumsum = hhs[hh_type].entry_cumsum + hhs[hh_type].returnees.cumsum()
 
@@ -186,7 +186,8 @@ def simulate_social_housing(
     apartment_returnee_delay,
     private_years_of_support,
     municipal_years_of_support,
-    apartment_cost,
+    private_apartment_cost,
+    municipal_apartment_cost,
     soft_relapse_rate,
     soft_intervention_share,
     active_self_help_share,
@@ -229,7 +230,8 @@ def simulate_social_housing(
         interventions=interventions,
         private_years_of_support=private_years_of_support,
         municipal_years_of_support=municipal_years_of_support,
-        apartment_cost=apartment_cost
+        private_apartment_cost=private_apartment_cost,
+        municipal_apartment_cost=municipal_apartment_cost
     ) #TODO apartment_costs
     
     return interventions, hhs_stats
