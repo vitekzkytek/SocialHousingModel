@@ -4,6 +4,7 @@ idx = pd.IndexSlice
 
 from supply import simulate_apartment_stock
 from demand import simulate_hh_stock
+
 import pdb
 
 def get_hhs_in_need(yr:int, interventions: pd.Series, hhs:pd.DataFrame, hh_type: str) -> int:
@@ -50,7 +51,7 @@ def fill_soft_interventions(yr: int, interventions: pd.Series, hhs: pd.DataFrame
     Assign soft/one off interventions coming from social housing system to certain share of households that are currently waiting for an intervention
     '''
     # Number of households that are currently waiting for an intervention
-    hhs_in_need = get_hhs_in_need(yr, flows, hhs, hh_type)
+    hhs_in_need = get_hhs_in_need(yr, interventions, hhs, hh_type)
 
     soft_interventions = hhs_in_need * soft_intervention_share
     interventions.loc[(yr, 'soft', hh_type)] = soft_interventions
@@ -130,19 +131,19 @@ def generate_interventions(
         interventions = fill_soft_interventions(yr, interventions, hhs, 'active', soft_intervention_share)
         interventions = fill_soft_interventions(yr, interventions, hhs, 'inactive', soft_intervention_share)
         
-        interventions = fill_apartment_flows(yr, interventions, apartments, hhs, 'private', 'active')
-        interventions = fill_apartment_flows(yr, interventions, apartments, hhs, 'municipal', 'inactive')
-        interventions = fill_apartment_flows(yr, interventions, apartments, hhs, 'private', 'inactive')
-        interventions = fill_apartment_flows(yr, interventions, apartments, hhs, 'municipal', 'active')
+        interventions = fill_apartment_interventions(yr, interventions, apartments, hhs, 'private', 'active')
+        interventions = fill_apartment_interventions(yr, interventions, apartments, hhs, 'municipal', 'inactive')
+        interventions = fill_apartment_interventions(yr, interventions, apartments, hhs, 'private', 'inactive')
+        interventions = fill_apartment_interventions(yr, interventions, apartments, hhs, 'municipal', 'active')
         
     return interventions
 
 
-def generate_hhs_stats(hhs, flows, private_years_of_support, municipal_years_of_support, apartment_cost):
-    def hhs_stats(hhs,flows,hh_type,private_years_of_support,municipal_years_of_support):
+def generate_hhs_stats(hhs, interventions, private_years_of_support, municipal_years_of_support, apartment_cost):
+    def hhs_stats(hhs,interventions,hh_type,private_years_of_support,municipal_years_of_support):
         total_cumsum = hhs[hh_type].entry_cumsum + hhs[hh_type].returnees.cumsum()
 
-        supported = flows.loc[idx[:,:,hh_type]].unstack('intervention')
+        supported = interventions.loc[idx[:,:,hh_type]].unstack('intervention')
         
         outside_cumsum = pd.DataFrame({
             'private':supported.private.shift(private_years_of_support).cumsum(),
@@ -167,8 +168,8 @@ def generate_hhs_stats(hhs, flows, private_years_of_support, municipal_years_of_
         })
         return df
     return pd.concat([
-        hhs_stats(hhs,flows,'active', private_years_of_support, municipal_years_of_support),
-        hhs_stats(hhs,flows,'inactive', private_years_of_support, municipal_years_of_support)
+        hhs_stats(hhs,interventions,'active', private_years_of_support, municipal_years_of_support),
+        hhs_stats(hhs,interventions,'inactive', private_years_of_support, municipal_years_of_support)
     ],axis=1)
 
 def simulate_social_housing(
@@ -225,7 +226,7 @@ def simulate_social_housing(
     
     hhs_stats = generate_hhs_stats(
         hhs=hhs, 
-        flows=flows,
+        interventions=interventions,
         private_years_of_support=private_years_of_support,
         municipal_years_of_support=municipal_years_of_support,
         apartment_cost=apartment_cost
