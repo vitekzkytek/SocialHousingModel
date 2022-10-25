@@ -1,8 +1,8 @@
 import pandas as pd
 import numpy as np
 
-def simulate_private(
-        private_yearly_apartments: int,
+def simulate_guaranteed(
+        guaranteed_yearly_apartments: int,
         years: np.ndarray
     ) -> pd.Series:
     '''
@@ -13,7 +13,7 @@ def simulate_private(
     Returns: pd.Series with the total number of private apartments that ever entered the social housing system.
     '''
     
-    return pd.Series({yr:private_yearly_apartments for yr in years}).cumsum()
+    return pd.Series({yr:guaranteed_yearly_apartments for yr in years}).cumsum()
     
 def simulate_municipal(
         municipal_apartments_today: int,
@@ -37,7 +37,7 @@ def simulate_municipal(
 
 
 def simulate_apartment_stock(
-        private_yearly_apartments,
+        guaranteed_yearly_apartments,
         municipal_apartments_today,
         municipal_yearly_new_apartments,
         municipal_existing_availability_rate,
@@ -56,13 +56,13 @@ def simulate_apartment_stock(
         years=years
     )
     
-    private = simulate_private(        
-        private_yearly_apartments=private_yearly_apartments,
+    guaranteed = simulate_guaranteed(        
+        guaranteed_yearly_apartments=guaranteed_yearly_apartments,
         years=years
     )
     apartments = pd.DataFrame({
-        ('private','entry_cumsum'):private,
-        ('municipal','entry_cumsum'):municipal
+        'guaranteed':guaranteed,
+        'municipal':municipal
     })
         
     return apartments.sort_index(axis=1).astype(int)

@@ -4,26 +4,16 @@ idx = pd.IndexSlice
 
 from supply import simulate_apartment_stock
 from demand import simulate_hh_stock
+idx = pd.IndexSlice
 
 import pdb
 
-def get_hhs_in_need(yr:int, interventions: pd.Series, hhs:pd.DataFrame, hh_type: str) -> int:
-    '''
-    From flows and hhs data computes number of households of given `hh_type` waiting for intervention in the given year
-    '''
+HH_STATUSES = ['queue', 'ongoing_intervention', 'outside']
+HH_RISKS = ['low','high']
+INTERVENTION_TYPES = ['guaranteed','municipal','mop_payment','self_help','consulting']
 
-    # Number of hhs that received any type of intervention up to this moment (including already assigned interventions in this year)
-    hhs_intervened_until_now = interventions.loc[idx[:yr,:,hh_type]].sum()
 
-    # The total stock of households in the given year
-    stock_of_newcomers = hhs.loc[yr,(hh_type,'entry_cumsum')]
-
-    # The total stock of returnees up to the given year
-    stock_of_returnees = hhs.loc[:yr,(hh_type,'returnees')].sum()
-
-    return stock_of_newcomers + stock_of_returnees - hhs_intervened_until_now
-
-def fill_apartment_interventions(yr: int, interventions: pd.Series, apartments: pd.DataFrame, hhs:pd.DataFrame, apartment_type: str, hh_type: str) -> pd.Series:
+def fill_apartment_interventions(yr: int, interventions: pd.Series, apartments: pd.DataFrame, hhs:pd.DataFrame, apartment_type: str, hh_risk: str) -> pd.Series:
     '''
     Assign `hh_type` households into `apartment_type` apartments for year `yr`. 
 
@@ -31,70 +21,92 @@ def fill_apartment_interventions(yr: int, interventions: pd.Series, apartments: 
     '''
 
     # Number of households that are currently waiting for an intervention
-    hhs_in_need = get_hhs_in_need(yr, interventions, hhs, hh_type)
+    hhs_in_need = hhs.loc[yr, ('queue', hh_risk)]
 
     # Number of apartments that were assigned up to this moment (note that no apartment can be used twice)
     apartments_assigned_until_now = interventions.loc[idx[:yr,apartment_type,:]].sum()
 
     # Derive number of available apartments
-    total_stock_of_apartments = apartments.loc[yr,(apartment_type,'entry_cumsum')] 
+    total_stock_of_apartments = apartments.loc[yr,apartment_type] 
     available_apartments = total_stock_of_apartments - apartments_assigned_until_now
 
     assignment = min(available_apartments, hhs_in_need)
-
-    interventions.loc[(yr,apartment_type, hh_type)] = assignment
-
+    
+    interventions.loc[(yr,apartment_type, hh_risk)] = assignment
+    
+    # Remove from queue
+    hhs.loc[yr, ('queue', hh_risk)] -= assignment
+    hhs.loc[yr, ('ongoing_intervention', hh_risk)] += assignment
+    
     return interventions
 
-def fill_soft_interventions(yr: int, interventions: pd.Series, hhs: pd.DataFrame, hh_type: str, soft_intervention_share: float) -> pd.Series:
+def fill_share_of_queue_intervention(yr: int, interventions: pd.Series, hhs: pd.DataFrame, intervention_shares: pd.DataFrame, hh_risk: str, intervention_type: str) -> pd.Series:
     '''
     Assign soft/one off interventions coming from social housing system to certain share of households that are currently waiting for an intervention
     '''
+
     # Number of households that are currently waiting for an intervention
-    hhs_in_need = get_hhs_in_need(yr, interventions, hhs, hh_type)
-
-    soft_interventions = hhs_in_need * soft_intervention_share
-    interventions.loc[(yr, 'soft', hh_type)] = soft_interventions
-
-    return interventions
-
-def fill_self_help(yr, interventions, hhs, hh_type, self_help_share):
-    '''
-    Assign self-help (i.e coming from outside of the social housing system) to certain share of households that are currently waiting for an intervention
-    '''
+    hhs_in_need = hhs.loc[yr, ('queue', hh_risk)]
     
-    # Number of households that are currently waiting for an intervention    
-    hhs_in_need = get_hhs_in_need(yr, interventions, hhs, hh_type)
-    self_helps = hhs_in_need * self_help_share
+    # number of hhs to receive queue intervention
+    intervened = hhs_in_need * intervention_shares.loc[hh_risk, intervention_type]
     
-    interventions.loc[(yr, 'self_help', hh_type)] = self_helps
+    # Record interventions
+    interventions.loc[(yr, intervention_type, hh_risk)] = intervened
 
-    return interventions
+    # Remove from queue
+    hhs.loc[yr, ('queue', hh_risk)] = hhs_in_need - intervened
+    hhs.loc[yr, ('ongoing_intervention', hh_risk)] += intervened
+    
+    return hhs, interventions
 
+
+def determine_hhs_queue(yr, hhs, returnees, interventions, relapse_rates, years_of_support, hhs_inflow):
+    # todo determine queue on the beginning of each round - returnees, inflow, transfer of status for each intervention types
+
+    years_of_interest = (yr - years_of_support).apply(lambda x: x if x >= 0 else np.nan).dropna()
+
+    if not years_of_interest.empty:
+        ending_interventions = interventions.unstack('intervention_type')[years_of_interest.index].apply(lambda col: col.loc[years_of_interest.loc[col.name]])
+        number_of_returnees = (ending_interventions * relapse_rates[ending_interventions.columns]).T.stack()
+        
+        returnees.loc[yr] = number_of_returnees
+
+        #queue compose of the last year queue, new inflow of hhs and returnees
+        hhs.loc[yr, [('queue',h) for h in HH_RISKS]] = (hhs.loc[yr-1].loc['queue'] + hhs_inflow.loc[HH_RISKS,'yearly_growth'] + number_of_returnees.unstack().sum()).loc[HH_RISKS].to_list()
+        
+        # remove ending interventions from ongoing interventions
+        hhs.loc[yr, [('ongoing_intervention',h) for h in HH_RISKS]] = (hhs.loc[yr-1].loc['ongoing_intervention'] - ending_interventions.sum(axis=1)).loc[HH_RISKS].to_list()
+                
+        # and the rest put outside
+        hhs.loc[yr, [('outside',h) for h in HH_RISKS]] = (hhs.loc[yr-1].loc['outside'] + ending_interventions.sum(axis=1) + number_of_returnees.unstack().sum()).loc[HH_RISKS].to_list()
+
+    return hhs, returnees
+    
 def generate_interventions(
     apartments: pd.DataFrame, 
-    hhs: pd.DataFrame, 
-    apartment_relapse_rate: float, 
-    apartment_returnee_delay: int, 
-    soft_relapse_rate: float, 
-    soft_intervention_share: float, 
-    active_self_help_share: float, 
-    inactive_self_help_share: float, 
-    self_help_relapse_rate: float,
+    relapse_rates: pd.DataFrame,
+    intervention_shares: pd.DataFrame,
+    low_risk_to_high_risk_transfer_share: float,
+    high_risk_to_low_risk_transfer_share: float,
+    hhs_inflow: pd.DataFrame,
+    years_of_support: pd.Series,
     years: np.ndarray
 ) -> pd.DataFrame:
     '''
     Generates interventions within the social housing system. 
     
-    4 types of interventions are simulated:
+    5 types of interventions are simulated:
         - `private`: household is assigned to private apartment
         - `municipal`: household is assigned to municipal apartment
         - `soft`: household is assigned a soft intervention
+        - `consulting_help`: hhs finds a stable housing outside of social housing system
         - `self_help`: household gets out of housing emergency by other means than social housing system and/or soft intervention
         
-    Interventions are done on two groups of households
-        - `active`
-        - `inactive.
+    Interventions are done on three groups of households
+        - `low_risk`
+        - `high_risk`
+        - `in_danger`
         
     The interventions are computed sequentially, taking into account all of the previous interventions. 
     
@@ -108,36 +120,50 @@ def generate_interventions(
     7. Inactive households to private apartments
     8. Active households to municipal apartments
     '''    
+    #phases = ['year_start','new_inflow','new_returnees','before_status_change','year_end']
+    
+    # Pregenerate table for households
+    hhs = pd.DataFrame(0,index=years, columns=pd.MultiIndex.from_product([HH_STATUSES, HH_RISKS], names=('hh_status', 'hh_risk')),dtype=float)
 
-    # Interventions are filled in the pregenerated pd.Series with multi-index with 3 dimensions - year, intervention type and hh type. Here only NaN are values, will be filled during settlement
-    interventions = pd.Series(index=pd.MultiIndex.from_product([years,['private','municipal','soft','self_help'],['active','inactive']], names=('year', 'intervention','hh')),dtype=float)
-
+    # Pregenerate Interventions and Returnees (Returnees only for tracking purpose)
+    interventions = pd.Series(index=pd.MultiIndex.from_product([years, INTERVENTION_TYPES, HH_RISKS], names=('year', 'intervention_type', 'hh_risk')),dtype=float)
+    returnees = pd.DataFrame(index=years, columns=pd.MultiIndex.from_product([INTERVENTION_TYPES,HH_RISKS], names=('intervention_type', 'hh_risk')),dtype=float)
+     
+    hhs.loc[0, [('queue',h) for h in HH_RISKS]] = hhs_inflow.loc[HH_RISKS,'current_level'].to_list()
+    
     for yr in years:
-        active_apartment_returnees = interventions.loc[idx[yr-apartment_returnee_delay, ['private','municipal'],'active']].sum() * apartment_relapse_rate if yr >= apartment_returnee_delay else 0
-        inactive_apartment_returnees = interventions.loc[idx[yr-apartment_returnee_delay, ['private','municipal'],'inactive']].sum() * apartment_relapse_rate if yr >= apartment_returnee_delay else 0
-
-        active_soft_returnees = interventions.loc[idx[yr-1, 'soft','active']] * soft_relapse_rate if yr > 0 else 0
-        inactive_soft_returnees = interventions.loc[idx[yr-1, 'soft','inactive']] * soft_relapse_rate if yr > 0 else 0
+        # Determine number of households in the queue
         
-        active_self_help_returnees = interventions.loc[idx[yr-1, 'self_help','active']] * self_help_relapse_rate if yr > 0 else 0
-        inactive_self_help_returnees = interventions.loc[idx[yr-1, 'self_help','inactive']] * self_help_relapse_rate if yr > 0 else 0
-
-        hhs.loc[yr,('active','returnees')] = active_apartment_returnees + active_soft_returnees + active_self_help_returnees
-        hhs.loc[yr,('inactive','returnees')] = inactive_apartment_returnees + inactive_soft_returnees + inactive_self_help_returnees
-
-        interventions = fill_self_help(yr, interventions, hhs, 'active', active_self_help_share)
-        interventions = fill_self_help(yr, interventions, hhs, 'inactive', inactive_self_help_share)
-
-        interventions = fill_soft_interventions(yr, interventions, hhs, 'active', soft_intervention_share)
-        interventions = fill_soft_interventions(yr, interventions, hhs, 'inactive', soft_intervention_share)
+        hhs, returnees = determine_hhs_queue(
+                yr = yr,
+                hhs = hhs,
+                returnees = returnees,
+                interventions = interventions, 
+                relapse_rates = relapse_rates, 
+                years_of_support = years_of_support,
+                hhs_inflow = hhs_inflow
+            )
+                
+        for intervention_type in ['self_help','consulting','mop_payment']:
+            for hh_risk in HH_RISKS:
+                hhs, interventions = fill_share_of_queue_intervention(
+                    yr = yr, 
+                    interventions = interventions,
+                    hhs = hhs,
+                    intervention_shares = intervention_shares,
+                    hh_risk = hh_risk, 
+                    intervention_type = intervention_type
+                )
         
-        interventions = fill_apartment_interventions(yr, interventions, apartments, hhs, 'private', 'active')
-        interventions = fill_apartment_interventions(yr, interventions, apartments, hhs, 'municipal', 'inactive')
-        interventions = fill_apartment_interventions(yr, interventions, apartments, hhs, 'private', 'inactive')
-        interventions = fill_apartment_interventions(yr, interventions, apartments, hhs, 'municipal', 'active')
-        
-    return interventions
+        # Priority assignments of apartments
+        interventions = fill_apartment_interventions(yr, interventions, apartments, hhs, 'guaranteed', 'low')
+        interventions = fill_apartment_interventions(yr, interventions, apartments, hhs, 'municipal', 'high')
 
+        # Secondary assignments of apartments
+        interventions = fill_apartment_interventions(yr, interventions, apartments, hhs, 'guaranteed', 'high')
+        interventions = fill_apartment_interventions(yr, interventions, apartments, hhs, 'municipal', 'low')
+        
+    return interventions, hhs, returnees
 
 def generate_hhs_stats(hhs, interventions, private_years_of_support, municipal_years_of_support, private_apartment_cost, municipal_apartment_cost):
     def hhs_stats(hhs,interventions,hh_type,private_years_of_support,municipal_years_of_support):
