@@ -3,7 +3,7 @@ import numpy as np
 idx = pd.IndexSlice 
 
 from supply import simulate_apartment_stock
-from demand import simulate_hh_stock
+
 idx = pd.IndexSlice
 
 import pdb
@@ -75,6 +75,8 @@ def determine_hhs_queue(yr, hhs, returnees, interventions, relapse_rates, years_
         #queue compose of the last year queue, new inflow of hhs and returnees
         hhs.loc[yr, [('queue',h) for h in HH_RISKS]] = (hhs.loc[yr-1].loc['queue'] + hhs_inflow.loc[HH_RISKS,'yearly_growth'] + number_of_returnees.unstack().sum()).loc[HH_RISKS].to_list()
         
+        # TODO Move part of last years' low-risk queue to this years high_risk queue
+        
         # remove ending interventions from ongoing interventions
         hhs.loc[yr, [('ongoing_intervention',h) for h in HH_RISKS]] = (hhs.loc[yr-1].loc['ongoing_intervention'] - ending_interventions.sum(axis=1)).loc[HH_RISKS].to_list()
                 
@@ -87,8 +89,6 @@ def generate_interventions(
     apartments: pd.DataFrame, 
     relapse_rates: pd.DataFrame,
     intervention_shares: pd.DataFrame,
-    low_risk_to_high_risk_transfer_share: float,
-    high_risk_to_low_risk_transfer_share: float,
     hhs_inflow: pd.DataFrame,
     years_of_support: pd.Series,
     years: np.ndarray
@@ -198,31 +198,51 @@ def generate_hhs_stats(hhs, interventions, private_years_of_support, municipal_y
         hhs_stats(hhs,interventions,'inactive', private_years_of_support, municipal_years_of_support)
     ],axis=1)
 
+def calculate_costs(interventions, years_of_support, intervention_costs):
+    
+    entry_apartments = interventions.loc[:,['guaranteed', 'municipal'],:].unstack('hh_risk').sum(axis=1).unstack('intervention_type')
+    entry_apartments_costs = intervention_costs.loc['entry',['guaranteed', 'municipal']] * entry_apartments
+
+    yearly_apartments = pd.DataFrame({
+         col: entry_apartments[col].rolling(years_of_support.loc[col], min_periods=1).sum() for col in ['guaranteed', 'municipal']
+    })
+
+    yearly_apartments_costs = intervention_costs.loc['yearly',['guaranteed', 'municipal']] *  yearly_apartments
+
+    consulting = interventions.loc[:,['guaranteed', 'municipal','consulting','mop_payment'],:].unstack(['hh_risk','intervention_type']).sum(axis=1).rename('consulting')
+    consulting_costs = (consulting * intervention_costs.loc['entry','consulting']).rename('consulting_costs')
+
+    mops = interventions.loc[:,'mop_payment',:].unstack('hh_risk').sum(axis=1).rename('mops')
+    mops_costs = (mops * intervention_costs.loc['entry','mop_payment']).rename('mops_costs')
+
+    social_assistance = yearly_apartments.sum(axis=1).rename('social_assistance')
+    social_assistance_costs = (intervention_costs.loc['yearly','social_assistance'] *  yearly_apartments.sum(axis=1)).rename('social_assistance_costs')
+
+    # Rename columns
+    entry_apartments.columns = [f'apartments_entry_{col}' for col in entry_apartments.columns]
+    entry_apartments_costs.columns = [f'apartments_entry_costs_{col}' for col in entry_apartments_costs.columns]
+    yearly_apartments.columns = [f'apartments_yearly_{col}' for col in yearly_apartments.columns] 
+    yearly_apartments_costs.columns = [f'apartments_yearly_costs_{col}' for col in yearly_apartments_costs.columns]
+
+    costs = pd.concat([entry_apartments, entry_apartments_costs, yearly_apartments, yearly_apartments_costs, consulting, consulting_costs, mops, mops_costs, social_assistance, social_assistance_costs],axis=1)
+    
+    return costs
+
 def simulate_social_housing(
-    private_yearly_apartments,
-    municipal_apartments_today,
+    guaranteed_yearly_apartments,
+    municipal_apartments_today ,
     municipal_yearly_new_apartments,
     municipal_existing_availability_rate,
     municipal_new_availability_rate,
-    active_current_hh_in_need,
-    active_yearly_new_hh,
-    inactive_current_hh_in_need,
-    inactive_yearly_new_hh,
-    apartment_relapse_rate,
-    apartment_returnee_delay,
-    private_years_of_support,
-    municipal_years_of_support,
-    private_apartment_cost,
-    municipal_apartment_cost,
-    soft_relapse_rate,
-    soft_intervention_share,
-    active_self_help_share,
-    inactive_self_help_share,
-    self_help_relapse_rate,
+    relapse_rates,
+    intervention_shares,
+    hhs_inflow,
+    years_of_support,
+    intervention_costs,
     years
 ):
     apartments = simulate_apartment_stock(
-        private_yearly_apartments=private_yearly_apartments,
+        guaranteed_yearly_apartments=guaranteed_yearly_apartments,
         municipal_apartments_today = municipal_apartments_today,
         municipal_yearly_new_apartments = municipal_yearly_new_apartments,
         municipal_existing_availability_rate = municipal_existing_availability_rate,
@@ -230,34 +250,18 @@ def simulate_social_housing(
         years=years
     )
     
-    hhs = simulate_hh_stock(
-        active_current_hh_in_need=active_current_hh_in_need,
-        active_yearly_new_hh=active_yearly_new_hh,
-        inactive_current_hh_in_need=inactive_current_hh_in_need,
-        inactive_yearly_new_hh=inactive_yearly_new_hh,
-        years=years
+    interventions, hhs, returnees = generate_interventions(
+        apartments = apartments,
+        relapse_rates = relapse_rates,
+        intervention_shares = intervention_shares,
+        hhs_inflow =hhs_inflow,
+        years_of_support = years_of_support,
+        years = years
     )
     
-    interventions = generate_interventions(
-        apartments=apartments,
-        hhs=hhs,
-        apartment_relapse_rate=apartment_relapse_rate,
-        apartment_returnee_delay=apartment_returnee_delay,
-        soft_relapse_rate=soft_relapse_rate,
-        soft_intervention_share=soft_intervention_share,
-        active_self_help_share=active_self_help_share,
-        inactive_self_help_share=inactive_self_help_share,
-        self_help_relapse_rate=self_help_relapse_rate,
-        years=years
-    )
-    
-    hhs_stats = generate_hhs_stats(
-        hhs=hhs, 
+    costs = calculate_costs(
         interventions=interventions,
-        private_years_of_support=private_years_of_support,
-        municipal_years_of_support=municipal_years_of_support,
-        private_apartment_cost=private_apartment_cost,
-        municipal_apartment_cost=municipal_apartment_cost
-    ) #TODO apartment_costs
-    
-    return interventions, hhs_stats
+        years_of_support=years_of_support,
+        intervention_costs=intervention_costs
+    )
+    return interventions, hhs, returnees, costs
