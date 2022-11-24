@@ -239,7 +239,8 @@ def simulate_social_housing(
     hhs_inflow,
     years_of_support,
     intervention_costs,
-    years
+    years,
+    excel_file=None
 ):
     apartments = simulate_apartment_stock(
         guaranteed_yearly_apartments=guaranteed_yearly_apartments,
@@ -264,4 +265,13 @@ def simulate_social_housing(
         years_of_support=years_of_support,
         intervention_costs=intervention_costs
     )
+    
+    
+    if excel_file is not None: 
+        with pd.ExcelWriter(excel_file) as writer:  
+
+            interventions.unstack(['intervention_type','hh_risk']).to_excel(writer, sheet_name='interventions')
+            returnees.to_excel(writer, sheet_name='returnees')
+            hhs.to_excel(writer, sheet_name='hhs')
+            costs.to_excel(writer, sheet_name='costs')
     return interventions, hhs, returnees, costs

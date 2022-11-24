@@ -53,6 +53,15 @@ def compute_variants(params_1, params_2, label_1 = 'variant 1', label_2 = 'varia
     
         fig.tight_layout()
         return fig, axs
+    elif plot_function == 'plot_basic_hhs':
+        axs[0] = plot_basic_costs(costs_1,ax=axs[0],title=label_1)
+        axs[1] = plot_basic_costs(costs_2,ax=axs[1],title=label_2)
+        
+        handles, labels = axs[0].get_legend_handles_labels()
+        fig.legend(handles, labels, loc=(0,-0.01), ncol=4, frameon=False)
+        [ax.get_legend().remove() for ax in axs]
+        fig.tight_layout()
+        return fig, axs
 
     else:
         'unknown plot function'
