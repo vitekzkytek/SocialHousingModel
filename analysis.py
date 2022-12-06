@@ -9,7 +9,7 @@ from main import simulate_social_housing
 CUSTOM_COLORS = [tuple(list(mc.to_rgb(c)) + [alpha]) for c in ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd'] for alpha in (.5,1)]   
 MLN_FORMATTER = FuncFormatter(lambda x, pos: f'{round(x/1000000)} mln. Kč')
 
-def plot_interventions(interventions, title='Počet podpořených domácností v daném roce', ax=None, figsize=(12,6)):
+def plot_interventions(interventions, title='Počet podpořených domácností v daném roce', ax=None, figsize=(12,6), ylim=None):
     colmap = {
         'self_help': 'Svépomoc',
         'mop_payment': 'Mimořádná okamžitá pomoc',
@@ -20,9 +20,9 @@ def plot_interventions(interventions, title='Počet podpořených domácností v
 
     df = interventions.groupby('intervention_type',axis=1).sum().rename(columns=colmap)
     
-    return df[colmap.values()].plot.bar(stacked=True, title=title, grid=True, figsize=figsize,color=CUSTOM_COLORS[1::2],ax=ax)
+    return df[colmap.values()].plot.bar(stacked=True, title=title, grid=True, figsize=figsize,color=CUSTOM_COLORS[1::2],ax=ax, ylim=ylim)
     
-def plot_hhs(hhs, title='Rozdělení domácností do segmentů', shares = False, ax = None, figsize=(12,6)):
+def plot_hhs(hhs, title='Rozdělení domácností do segmentů', shares = False, ax = None, figsize=(12,6), ylim=None):
     df = hhs.groupby('hh_status',axis=1).sum()
     
     if shares: 
@@ -38,9 +38,9 @@ def plot_hhs(hhs, title='Rozdělení domácností do segmentů', shares = False,
         'Vyřešeno - měkká opatření':df.outside_consulting + df.outside_mop_payment,
         'Vyřešeno - garantované bydlení': df.outside_guaranteed,
         'Vyřešeno - obecní bydlení': df.outside_municipal
-    }).plot.bar(stacked=True, figsize=figsize, grid=True, title=title,ax=ax, color=CUSTOM_COLORS[1::2] + [CUSTOM_COLORS[2],CUSTOM_COLORS[4],CUSTOM_COLORS[6],CUSTOM_COLORS[8]] );
+    }).plot.bar(stacked=True, figsize=figsize, grid=True, title=title,ax=ax, color=CUSTOM_COLORS[1::2] + [CUSTOM_COLORS[2],CUSTOM_COLORS[4],CUSTOM_COLORS[6],CUSTOM_COLORS[8]], ylim=ylim);
        
-def plot_costs(costs, title='Přímé náklady intervencí sociálního bydlení',ax=None, include_queue_budget=True, include_queue_social=False, figsize=(12,6)):
+def plot_costs(costs, title='Přímé náklady intervencí sociálního bydlení',ax=None, include_queue_budget=True, include_queue_social=False, figsize=(12,6), ylim=None):
     
     df = costs.copy()
 
@@ -62,7 +62,7 @@ def plot_costs(costs, title='Přímé náklady intervencí sociálního bydlení
     }
     
     
-    ax = df.rename(columns=colmap).plot.bar(stacked=True, grid=True, title=title, figsize=None,color=CUSTOM_COLORS[:len(costs.columns)-2] + ['gray','lightgray'],ax=ax)
+    ax = df.rename(columns=colmap).plot.bar(stacked=True, grid=True, title=title, figsize=figsize,color=CUSTOM_COLORS[:len(costs.columns)-2] + ['gray','lightgray'],ax=ax,ylim=ylim)
     ax.yaxis.set_major_formatter(MLN_FORMATTER);
     
     return ax
@@ -117,8 +117,7 @@ def plot_4_variants(variant_1A, variant_1B, variant_2A, variant_2B, plot_functio
         return fig, axs
 
 
-def compare_variants(params_1, params_2):
-    
+def compare_variants(params_1, params_2, ylim_costs=(0,4000000000), ylim_interventions=(0, 25000), ylim_hhs=(0,150000)):
     interventions_1, hhs_1, returnees_1, costs_1, costs_units_1 = simulate_social_housing(**params_1)
 
     interventions_2, hhs_2, returnees_2, costs_2, costs_units_2 = simulate_social_housing(**params_2)
@@ -127,21 +126,21 @@ def compare_variants(params_1, params_2):
     fig.subplots_adjust(right=0.8)
 
     # Interventions
-    axs[0,0] = plot_interventions(interventions_1, ax=axs[0,0], title=f'{params_1["title"]} - Intervence', figsize=None)
-    axs[0,1] = plot_interventions(interventions_2, ax=axs[0,1], title=f'{params_2["title"]} - Intervence', figsize=None)            
+    axs[0,0] = plot_interventions(interventions_1, ax=axs[0,0], title=f'{params_1["title"]} - Intervence', figsize=None,ylim=ylim_interventions)
+    axs[0,1] = plot_interventions(interventions_2, ax=axs[0,1], title=f'{params_2["title"]} - Intervence', figsize=None,ylim=ylim_interventions)            
     axs[0,0].get_legend().remove()
     axs[0,1].legend(loc='center left', bbox_to_anchor=(1, 0.5))
     
     
     # Hhs
-    axs[1,0] = plot_hhs(hhs_1,ax=axs[1,0],title=f'{params_1["title"]} - Domácnosti',figsize=None)
-    axs[1,1] = plot_hhs(hhs_2,ax=axs[1,1],title=f'{params_2["title"]} - Domácnosti',figsize=None)
+    axs[1,0] = plot_hhs(hhs_1,ax=axs[1,0],title=f'{params_1["title"]} - Domácnosti',figsize=None,ylim=ylim_hhs)
+    axs[1,1] = plot_hhs(hhs_2,ax=axs[1,1],title=f'{params_2["title"]} - Domácnosti',figsize=None,ylim=ylim_hhs)
     axs[1,0].get_legend().remove()
     axs[1,1].legend(loc='center left', bbox_to_anchor=(1, 0.5))
 
     # Costs
-    axs[2,0] = plot_costs(costs_1, ax=axs[2,0], title=f'{params_1["title"]} - Náklady', figsize=None, include_queue_budget=True, include_queue_social=False)
-    axs[2,1] = plot_costs(costs_2, ax=axs[2,1], title=f'{params_2["title"]} - Náklady', figsize=None, include_queue_budget=True, include_queue_social=False)
+    axs[2,0] = plot_costs(costs_1, ax=axs[2,0], title=f'{params_1["title"]} - Náklady', figsize=None, include_queue_budget=True, include_queue_social=False,ylim=ylim_costs)
+    axs[2,1] = plot_costs(costs_2, ax=axs[2,1], title=f'{params_2["title"]} - Náklady', figsize=None, include_queue_budget=True, include_queue_social=False,ylim=ylim_costs)
     axs[2,0].get_legend().remove()
     axs[2,1].legend(loc='center left', bbox_to_anchor=(1, 0.5))
 
