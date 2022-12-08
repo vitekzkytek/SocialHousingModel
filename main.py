@@ -185,7 +185,7 @@ def generate_interventions(
     return interventions, hhs, returnees
 
 
-def calculate_costs(interventions, hhs, years_of_support, social_assistences, intervention_costs):
+def calculate_costs(interventions, hhs, years_of_support, social_assistences, intervention_costs, discount_rate):
     
     # Number of apartment interventions in given year
     
@@ -215,7 +215,6 @@ def calculate_costs(interventions, hhs, years_of_support, social_assistences, in
     ## Queue units
     queue = hhs.queue.sum(axis=1).rename('queue')
     
-    
     costs_units = pd.concat([entry_apartments, yearly_apartments, consulting, mops,  yearly_social_assistence,queue],axis=1)
 
     # Convert units to costs ("lepení cenovek")
@@ -230,7 +229,11 @@ def calculate_costs(interventions, hhs, years_of_support, social_assistences, in
         'queue_budget': costs_units['queue'] * intervention_costs.loc['yearly','queue_budget'],
         'queue_social': costs_units['queue'] * intervention_costs.loc['yearly','queue_social'],
     })    
-    return costs, costs_units
+
+
+    costs_discounted = costs.apply(lambda row: row/((1+discount_rate) ** row.name), axis=1)
+
+    return costs, costs_units, costs_discounted
 
 def simulate_social_housing(
     guaranteed_yearly_apartments,
@@ -244,6 +247,7 @@ def simulate_social_housing(
     years_of_support,
     social_assistences,
     intervention_costs,
+    discount_rate,
     years,
     title
 ):
@@ -265,12 +269,13 @@ def simulate_social_housing(
         years = years
     )
     
-    costs, costs_units = calculate_costs(
+    costs, costs_units, costs_discounted = calculate_costs(
         interventions=interventions,
         hhs = hhs,
         years_of_support=years_of_support,
         social_assistences=social_assistences,
-        intervention_costs=intervention_costs
+        intervention_costs=intervention_costs,
+        discount_rate=discount_rate
     )
     
-    return interventions, hhs, returnees, costs, costs_units
+    return interventions, hhs, returnees, costs, costs_units, costs_discounted

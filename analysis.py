@@ -66,9 +66,10 @@ def plot_costs(costs, title='Přímé náklady intervencí sociálního bydlení
     ax.yaxis.set_major_formatter(MLN_FORMATTER);
     
     return ax
+
 def simulate_social_housing_to_dict(variant):
-    interventions, hhs, returnees, costs, costs_units = simulate_social_housing(**variant)
-    return {'interventions':interventions,'hhs':hhs,'returnees':returnees,'costs':costs,'costs_units':costs_units}
+    interventions, hhs, returnees, costs, costs_units, costs_discounted = simulate_social_housing(**variant)
+    return {'interventions':interventions,'hhs':hhs,'returnees':returnees,'costs':costs,'costs_units':costs_units, 'costs_discounted':costs_discounted}
 
 def plot_4_variants(variant_1A, variant_1B, variant_2A, variant_2B, plot_function = 'plot_hhs', excel_file = None):
         
@@ -103,6 +104,19 @@ def plot_4_variants(variant_1A, variant_1B, variant_2A, variant_2B, plot_functio
         fig.suptitle('Náklady systému sociálního bydlení',y=.95)
         #fig.tight_layout()
         return fig, axs
+    elif plot_function == 'plot_costs_discounted':
+        axs[0,0] = plot_costs(tables_1A['costs_discounted'], ax=axs[0,0], title=variant_1A['title'], figsize=None, include_queue_budget=True, include_queue_social=False)
+        axs[1,0] = plot_costs(tables_1B['costs_discounted'], ax=axs[1,0], title=variant_1B['title'], figsize=None, include_queue_budget=True, include_queue_social=False)
+        axs[0,1] = plot_costs(tables_2A['costs_discounted'], ax=axs[0,1], title=variant_2A['title'], figsize=None, include_queue_budget=True, include_queue_social=False)
+        axs[1,1] = plot_costs(tables_2B['costs_discounted'], ax=axs[1,1], title=variant_2B['title'], figsize=None, include_queue_budget=True, include_queue_social=False)
+
+        handles, labels = axs[0,0].get_legend_handles_labels()
+        fig.legend(handles, labels, loc='lower center', ncol=5, frameon=False)
+        [ax.get_legend().remove() for ax in axs.flatten()]
+        fig.suptitle('Náklady systému sociálního bydlení',y=.95)
+        #fig.tight_layout()
+        return fig, axs
+
     elif plot_function == 'plot_interventions':
         axs[0,0] = plot_interventions(tables_1A['interventions'], ax=axs[0,0], title=variant_1A['title'], figsize=None)
         axs[1,0] = plot_interventions(tables_1B['interventions'], ax=axs[1,0], title=variant_1B['title'], figsize=None)
@@ -117,10 +131,10 @@ def plot_4_variants(variant_1A, variant_1B, variant_2A, variant_2B, plot_functio
         return fig, axs
 
 
-def compare_variants(params_1, params_2, ylim_costs=(0,4000000000), ylim_interventions=(0, 25000), ylim_hhs=(0,150000)):
-    interventions_1, hhs_1, returnees_1, costs_1, costs_units_1 = simulate_social_housing(**params_1)
+def compare_variants(params_1, params_2, ylim_costs=(0,4000000000), ylim_interventions=(0, 25000), ylim_hhs=(0,150000),discount_costs=True):
+    interventions_1, hhs_1, returnees_1, costs_1, costs_units_1, costs_discounted_1 = simulate_social_housing(**params_1)
 
-    interventions_2, hhs_2, returnees_2, costs_2, costs_units_2 = simulate_social_housing(**params_2)
+    interventions_2, hhs_2, returnees_2, costs_2, costs_units_2, costs_discounted_2 = simulate_social_housing(**params_2)
     
     fig, axs = plt.subplots(nrows=3, ncols=2,figsize=(15, 10),sharex=True,sharey=False)
     fig.subplots_adjust(right=0.8)
@@ -139,8 +153,13 @@ def compare_variants(params_1, params_2, ylim_costs=(0,4000000000), ylim_interve
     axs[1,1].legend(loc='center left', bbox_to_anchor=(1, 0.5))
 
     # Costs
-    axs[2,0] = plot_costs(costs_1, ax=axs[2,0], title=f'{params_1["title"]} - Náklady', figsize=None, include_queue_budget=True, include_queue_social=False,ylim=ylim_costs)
-    axs[2,1] = plot_costs(costs_2, ax=axs[2,1], title=f'{params_2["title"]} - Náklady', figsize=None, include_queue_budget=True, include_queue_social=False,ylim=ylim_costs)
+    if discount_costs:
+        axs[2,0] = plot_costs(costs_discounted_1, ax=axs[2,0], title=f'{params_1["title"]} - Náklady (diskontované)', figsize=None, include_queue_budget=True, include_queue_social=False,ylim=ylim_costs)
+        axs[2,1] = plot_costs(costs_discounted_2, ax=axs[2,1], title=f'{params_2["title"]} - Náklady (diskontované)', figsize=None, include_queue_budget=True, include_queue_social=False,ylim=ylim_costs)
+    else:
+        axs[2,0] = plot_costs(costs_1, ax=axs[2,0], title=f'{params_1["title"]} - Náklady', figsize=None, include_queue_budget=True, include_queue_social=False,ylim=ylim_costs)
+        axs[2,1] = plot_costs(costs_2, ax=axs[2,1], title=f'{params_2["title"]} - Náklady', figsize=None, include_queue_budget=True, include_queue_social=False,ylim=ylim_costs)
+
     axs[2,0].get_legend().remove()
     axs[2,1].legend(loc='center left', bbox_to_anchor=(1, 0.5))
 
@@ -158,4 +177,5 @@ def save_tables_to_excel(variants, excel_file):
         pd.concat([tbl_dicts[key]['hhs'].assign(variant=key) for key in tbl_dicts]).to_excel(writer, sheet_name='hhs')
         pd.concat([tbl_dicts[key]['costs'].assign(variant=key) for key in tbl_dicts]).to_excel(writer, sheet_name='costs')
         pd.concat([tbl_dicts[key]['costs_units'].assign(variant=key) for key in tbl_dicts]).to_excel(writer, sheet_name='costs_units')
+        pd.concat([tbl_dicts[key]['costs_discounted'].assign(variant=key) for key in tbl_dicts]).to_excel(writer, sheet_name='costs_discounted')
 
