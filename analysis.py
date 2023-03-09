@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 from matplotlib import pyplot as plt
 import matplotlib.colors as mc
 from main import simulate_social_housing
@@ -58,7 +59,9 @@ def plot_costs(costs, title='Přímé náklady intervencí sociálního bydlení
         'mop_payment': 'Mimořádná okamžitá pomoc',
         'social_assistence': 'Sociální asistence',
         'queue_budget': 'Rozpočtové náklady bytové nouze',
-        'queue_social': 'Společenské náklady bytové nouze'
+        'queue_social': 'Společenské náklady bytové nouze',
+        'IT_system':'Náklady na IT systém',
+        'regional_administration':'Náklady veřejné správy'
     }
     
     
@@ -67,24 +70,19 @@ def plot_costs(costs, title='Přímé náklady intervencí sociálního bydlení
     
     return ax
 
-def simulate_social_housing_to_dict(variant):
-    interventions, hhs, returnees, costs, costs_units, costs_discounted = simulate_social_housing(**variant)
-    return {'interventions':interventions,'hhs':hhs,'returnees':returnees,'costs':costs,'costs_units':costs_units, 'costs_discounted':costs_discounted}
+#def simulate_social_housing(variant):
+#    interventions, hhs, returnees, costs, costs_units, costs_discounted = simulate_social_housing(**variant)
+#    return {'interventions':interventions,'hhs':hhs,'returnees':returnees,'costs':costs,'costs_units':costs_units, 'costs_discounted':costs_discounted}
 
-def plot_4_variants(variant_1A, variant_1B, variant_2A, variant_2B, plot_function = 'plot_hhs', excel_file = None):
-        
-    tables_1A = simulate_social_housing_to_dict(variant_1A)
-    tables_1B = simulate_social_housing_to_dict(variant_1B)
-    tables_2A = simulate_social_housing_to_dict(variant_2A)
-    tables_2B = simulate_social_housing_to_dict(variant_2B)
+def plot_4_variants(tables_1A, tables_1B, tables_2A, tables_2B, plot_function = 'plot_hhs', excel_file = None):       
 
     fig, axs = plt.subplots(nrows=2,ncols=2,figsize=(15, 10), sharex=True, sharey=True)
     
     if plot_function == 'plot_hhs':
-        axs[0,0] = plot_hhs(tables_1A['hhs'],ax=axs[0,0],title=variant_1A['title'],figsize=None)
-        axs[1,0] = plot_hhs(tables_1B['hhs'],ax=axs[1,0],title=variant_1B['title'],figsize=None)
-        axs[0,1] = plot_hhs(tables_2A['hhs'],ax=axs[0,1],title=variant_2A['title'],figsize=None)
-        axs[1,1] = plot_hhs(tables_2B['hhs'],ax=axs[1,1],title=variant_2B['title'],figsize=None)
+        axs[0,0] = plot_hhs(tables_1A['hhs'],ax=axs[0,0],title=tables_1A['title'],figsize=None)
+        axs[1,0] = plot_hhs(tables_1B['hhs'],ax=axs[1,0],title=tables_1B['title'],figsize=None)
+        axs[0,1] = plot_hhs(tables_2A['hhs'],ax=axs[0,1],title=tables_2A['title'],figsize=None)
+        axs[1,1] = plot_hhs(tables_2B['hhs'],ax=axs[1,1],title=tables_2B['title'],figsize=None)
 
         handles, labels = axs[0,0].get_legend_handles_labels()
         fig.legend(handles, labels, loc='lower center', ncol=5, frameon=False)
@@ -93,10 +91,10 @@ def plot_4_variants(variant_1A, variant_1B, variant_2A, variant_2B, plot_functio
         #fig.tight_layout()
         return fig, axs
     elif plot_function == 'plot_costs':
-        axs[0,0] = plot_costs(tables_1A['costs'], ax=axs[0,0], title=variant_1A['title'], figsize=None, include_queue_budget=True, include_queue_social=False)
-        axs[1,0] = plot_costs(tables_1B['costs'], ax=axs[1,0], title=variant_1B['title'], figsize=None, include_queue_budget=True, include_queue_social=False)
-        axs[0,1] = plot_costs(tables_2A['costs'], ax=axs[0,1], title=variant_2A['title'], figsize=None, include_queue_budget=True, include_queue_social=False)
-        axs[1,1] = plot_costs(tables_2B['costs'], ax=axs[1,1], title=variant_2B['title'], figsize=None, include_queue_budget=True, include_queue_social=False)
+        axs[0,0] = plot_costs(tables_1A['costs'], ax=axs[0,0], title=tables_1A['title'], figsize=None, include_queue_budget=True, include_queue_social=False)
+        axs[1,0] = plot_costs(tables_1B['costs'], ax=axs[1,0], title=tables_1B['title'], figsize=None, include_queue_budget=True, include_queue_social=False)
+        axs[0,1] = plot_costs(tables_2A['costs'], ax=axs[0,1], title=tables_2A['title'], figsize=None, include_queue_budget=True, include_queue_social=False)
+        axs[1,1] = plot_costs(tables_2B['costs'], ax=axs[1,1], title=tables_2B['title'], figsize=None, include_queue_budget=True, include_queue_social=False)
 
         handles, labels = axs[0,0].get_legend_handles_labels()
         fig.legend(handles, labels, loc='lower center', ncol=5, frameon=False)
@@ -105,10 +103,10 @@ def plot_4_variants(variant_1A, variant_1B, variant_2A, variant_2B, plot_functio
         #fig.tight_layout()
         return fig, axs
     elif plot_function == 'plot_costs_discounted':
-        axs[0,0] = plot_costs(tables_1A['costs_discounted'], ax=axs[0,0], title=variant_1A['title'], figsize=None, include_queue_budget=True, include_queue_social=False)
-        axs[1,0] = plot_costs(tables_1B['costs_discounted'], ax=axs[1,0], title=variant_1B['title'], figsize=None, include_queue_budget=True, include_queue_social=False)
-        axs[0,1] = plot_costs(tables_2A['costs_discounted'], ax=axs[0,1], title=variant_2A['title'], figsize=None, include_queue_budget=True, include_queue_social=False)
-        axs[1,1] = plot_costs(tables_2B['costs_discounted'], ax=axs[1,1], title=variant_2B['title'], figsize=None, include_queue_budget=True, include_queue_social=False)
+        axs[0,0] = plot_costs(tables_1A['costs_discounted'], ax=axs[0,0], title=tables_1A['title'], figsize=None, include_queue_budget=True, include_queue_social=False)
+        axs[1,0] = plot_costs(tables_1B['costs_discounted'], ax=axs[1,0], title=tables_1B['title'], figsize=None, include_queue_budget=True, include_queue_social=False)
+        axs[0,1] = plot_costs(tables_2A['costs_discounted'], ax=axs[0,1], title=tables_2A['title'], figsize=None, include_queue_budget=True, include_queue_social=False)
+        axs[1,1] = plot_costs(tables_2B['costs_discounted'], ax=axs[1,1], title=tables_2B['title'], figsize=None, include_queue_budget=True, include_queue_social=False)
 
         handles, labels = axs[0,0].get_legend_handles_labels()
         fig.legend(handles, labels, loc='lower center', ncol=5, frameon=False)
@@ -118,10 +116,10 @@ def plot_4_variants(variant_1A, variant_1B, variant_2A, variant_2B, plot_functio
         return fig, axs
 
     elif plot_function == 'plot_interventions':
-        axs[0,0] = plot_interventions(tables_1A['interventions'], ax=axs[0,0], title=variant_1A['title'], figsize=None)
-        axs[1,0] = plot_interventions(tables_1B['interventions'], ax=axs[1,0], title=variant_1B['title'], figsize=None)
-        axs[0,1] = plot_interventions(tables_2A['interventions'], ax=axs[0,1], title=variant_2A['title'], figsize=None)
-        axs[1,1] = plot_interventions(tables_2B['interventions'], ax=axs[1,1], title=variant_2B['title'], figsize=None)
+        axs[0,0] = plot_interventions(tables_1A['interventions'], ax=axs[0,0], title=tables_1A['title'], figsize=None)
+        axs[1,0] = plot_interventions(tables_1B['interventions'], ax=axs[1,0], title=tables_1B['title'], figsize=None)
+        axs[0,1] = plot_interventions(tables_2A['interventions'], ax=axs[0,1], title=tables_2A['title'], figsize=None)
+        axs[1,1] = plot_interventions(tables_2B['interventions'], ax=axs[1,1], title=tables_2B['title'], figsize=None)
 
         handles, labels = axs[0,0].get_legend_handles_labels()
         fig.legend(handles, labels, loc='lower center', ncol=5, frameon=False)
@@ -131,51 +129,136 @@ def plot_4_variants(variant_1A, variant_1B, variant_2A, variant_2B, plot_functio
         return fig, axs
 
 
-def compare_variants(params_1, params_2, ylim_costs=(0,4000000000), ylim_interventions=(0, 25000), ylim_hhs=(0,150000),discount_costs=True):
-    interventions_1, hhs_1, returnees_1, costs_1, costs_units_1, costs_discounted_1 = simulate_social_housing(**params_1)
-
-    interventions_2, hhs_2, returnees_2, costs_2, costs_units_2, costs_discounted_2 = simulate_social_housing(**params_2)
+def compare_variants(output_1, output_2, ylim_costs=(0,4000000000), ylim_interventions=(0, 25000), ylim_hhs=(0,150000),discount_costs=True):
     
     fig, axs = plt.subplots(nrows=3, ncols=2,figsize=(15, 10),sharex=True,sharey=False)
     fig.subplots_adjust(right=0.8)
 
     # Interventions
-    axs[0,0] = plot_interventions(interventions_1, ax=axs[0,0], title=f'{params_1["title"]} - Intervence', figsize=None,ylim=ylim_interventions)
-    axs[0,1] = plot_interventions(interventions_2, ax=axs[0,1], title=f'{params_2["title"]} - Intervence', figsize=None,ylim=ylim_interventions)            
+    axs[0,0] = plot_interventions(output_1['interventions'], ax=axs[0,0], title=f'{output_1["title"]} - Intervence', figsize=None,ylim=ylim_interventions)
+    axs[0,1] = plot_interventions(output_2['interventions'], ax=axs[0,1], title=f'{output_2["title"]} - Intervence', figsize=None,ylim=ylim_interventions)            
     axs[0,0].get_legend().remove()
     axs[0,1].legend(loc='center left', bbox_to_anchor=(1, 0.5))
     
     
     # Hhs
-    axs[1,0] = plot_hhs(hhs_1,ax=axs[1,0],title=f'{params_1["title"]} - Domácnosti',figsize=None,ylim=ylim_hhs)
-    axs[1,1] = plot_hhs(hhs_2,ax=axs[1,1],title=f'{params_2["title"]} - Domácnosti',figsize=None,ylim=ylim_hhs)
+    axs[1,0] = plot_hhs(output_1['hhs'],ax=axs[1,0],title=f'{output_1["title"]} - Domácnosti',figsize=None,ylim=ylim_hhs)
+    axs[1,1] = plot_hhs(output_2['hhs'],ax=axs[1,1],title=f'{output_2["title"]} - Domácnosti',figsize=None,ylim=ylim_hhs)
     axs[1,0].get_legend().remove()
     axs[1,1].legend(loc='center left', bbox_to_anchor=(1, 0.5))
 
     # Costs
     if discount_costs:
-        axs[2,0] = plot_costs(costs_discounted_1, ax=axs[2,0], title=f'{params_1["title"]} - Náklady (diskontované)', figsize=None, include_queue_budget=True, include_queue_social=False,ylim=ylim_costs)
-        axs[2,1] = plot_costs(costs_discounted_2, ax=axs[2,1], title=f'{params_2["title"]} - Náklady (diskontované)', figsize=None, include_queue_budget=True, include_queue_social=False,ylim=ylim_costs)
+        axs[2,0] = plot_costs(output_1['costs_discounted'], ax=axs[2,0], title=f'{output_1["title"]} - Náklady (diskontované)', figsize=None, include_queue_budget=True, include_queue_social=False,ylim=ylim_costs)
+        axs[2,1] = plot_costs(output_2['costs_discounted'], ax=axs[2,1], title=f'{output_2["title"]} - Náklady (diskontované)', figsize=None, include_queue_budget=True, include_queue_social=False,ylim=ylim_costs)
     else:
-        axs[2,0] = plot_costs(costs_1, ax=axs[2,0], title=f'{params_1["title"]} - Náklady', figsize=None, include_queue_budget=True, include_queue_social=False,ylim=ylim_costs)
-        axs[2,1] = plot_costs(costs_2, ax=axs[2,1], title=f'{params_2["title"]} - Náklady', figsize=None, include_queue_budget=True, include_queue_social=False,ylim=ylim_costs)
+        axs[2,0] = plot_costs(output_1['costs'], ax=axs[2,0], title=f'{output_1["title"]} - Náklady', figsize=None, include_queue_budget=True, include_queue_social=False,ylim=ylim_costs)
+        axs[2,1] = plot_costs(output_2['costs'], ax=axs[2,1], title=f'{output_2["title"]} - Náklady', figsize=None, include_queue_budget=True, include_queue_social=False,ylim=ylim_costs)
 
     axs[2,0].get_legend().remove()
     axs[2,1].legend(loc='center left', bbox_to_anchor=(1, 0.5))
 
     return fig, axs
 
-def save_tables_to_excel(variants, excel_file):
+def save_tables_to_excel(tbl_dicts, excel_file):
     
-    tbl_dicts = {
-        variant['title']: simulate_social_housing_to_dict(variant) for variant in variants
-    }
-    
-    with pd.ExcelWriter(excel_file) as writer:  
-        pd.concat([tbl_dicts[key]['interventions'].assign(variant=key) for key in tbl_dicts]).to_excel(writer, sheet_name='interventions')
-        pd.concat([tbl_dicts[key]['returnees'].assign(variant=key) for key in tbl_dicts]).to_excel(writer, sheet_name='returnees')
-        pd.concat([tbl_dicts[key]['hhs'].assign(variant=key) for key in tbl_dicts]).to_excel(writer, sheet_name='hhs')
-        pd.concat([tbl_dicts[key]['costs'].assign(variant=key) for key in tbl_dicts]).to_excel(writer, sheet_name='costs')
-        pd.concat([tbl_dicts[key]['costs_units'].assign(variant=key) for key in tbl_dicts]).to_excel(writer, sheet_name='costs_units')
-        pd.concat([tbl_dicts[key]['costs_discounted'].assign(variant=key) for key in tbl_dicts]).to_excel(writer, sheet_name='costs_discounted')
+    tables = ['interventions','returnees','hhs','costs','costs_units','costs_discounted']
 
+    with pd.ExcelWriter(excel_file) as writer:  
+        for table in tables:
+                pd.concat([tbl_dict[table].assign(variant=tbl_dict['title']) for tbl_dict in tbl_dicts]).to_excel(writer, sheet_name=table)
+        #pd.concat([tbl_dicts[key]['interventions'].assign(variant=key) for key in tbl_dicts]).to_excel(writer, sheet_name='interventions')
+        #pd.concat([tbl_dicts[key]['returnees'].assign(variant=key) for key in tbl_dicts]).to_excel(writer, sheet_name='returnees')
+        #pd.concat([tbl_dicts[key]['hhs'].assign(variant=key) for key in tbl_dicts]).to_excel(writer, sheet_name='hhs')
+        #pd.concat([tbl_dicts[key]['costs'].assign(variant=key) for key in tbl_dicts]).to_excel(writer, sheet_name='costs')
+        #pd.concat([tbl_dicts[key]['costs_units'].assign(variant=key) for key in tbl_dicts]).to_excel(writer, sheet_name='costs_units')
+        #pd.concat([tbl_dicts[key]['costs_discounted'].assign(variant=key) for key in tbl_dicts]).to_excel(writer, sheet_name='costs_discounted')
+
+
+def plot_grouped_stacked(df, title='', y_axis_formatter = None, reverse_alphas=False):
+    variant_names = list(df.index.get_level_values('varianta').unique())
+    col_names = list(df.columns)
+    ind_names = list(df.index.get_level_values('rok').unique())
+    
+    n_df = len(variant_names)
+    n_col = len(col_names) 
+    n_ind = len(ind_names)
+    
+    hex_colors = [col['color'] for col in plt.rcParams['axes.prop_cycle']]
+    rgb_colors = [tuple(int(col[i:i+2], 16)/255 for i in (1, 3, 5)) for col in hex_colors]
+
+    if n_col == 3:
+        alphas = (.33,.66,1.)
+    elif n_col == 4:
+        alphas = (.25,.5,.75,1.)
+    elif n_col == 5:
+        alphas = (.2,.4,.6,.8,1.)
+    elif n_col == 2:
+        alphas = (.5,1.)
+
+    else:
+        print('incorrect number of columns, specify alphas first')
+        return
+    
+    if reverse_alphas:
+        alphas = alphas[::-1]
+        
+    fig, axe = plt.subplots(ncols=1,nrows=1,figsize=(20,6))
+    
+    for order, variant in enumerate(variant_names):
+        
+        rgb = rgb_colors[order]
+        df_var = df.loc[variant]
+        
+        axe = df_var.plot(
+            kind='bar',
+            ax=axe,
+            stacked=True,
+            linewidth=0,
+            color = [rgb + (alpha,) for alpha in alphas],
+            legend=False,
+            grid=True
+        )
+    h,l = axe.get_legend_handles_labels() # get the handles we want to modify
+    for i in range(0, n_df * n_col, n_col): # len(h) = n_col * n_df
+        for j, pa in enumerate(h[i:i+n_col]):
+            for rect in pa.patches: # for each index
+                rect.set_x(rect.get_x() + 1 / float(n_df + 1) * i / float(n_col))
+                #rect.set_hatch(H * int(i / n_col)) #edited part     
+                rect.set_width(1 / float(n_df + 1))
+
+    axe.set_xticks((np.arange(0, 2 * n_ind, 2) + 1 / float(n_df + 1)) / 2.)
+    axe.set_xticklabels(ind_names, rotation = 0)
+    axe.set_xlabel('')
+    axe.set_title(title)
+    
+    if y_axis_formatter:
+        axe.yaxis.set_major_formatter(y_axis_formatter)
+
+    # Add invisible data to add variant legend
+    n1 = [axe.bar(0, 0, color=rgb_colors[i] ) for i in range(n_df)]
+    l1 = axe.legend(n1, variant_names, loc=[1.01, 0.1]) 
+    
+    n2 = [axe.bar(0, 0, color=(0,0,0) + (alphas[i],) ) for i in range(n_col)]
+    l2 = axe.legend(n2, list(df.columns), loc=[1.01, 0.5])
+
+    # Add invisible data to add columns legend
+    axe.add_artist(l1)
+    axe.add_artist(l2)
+    
+    return axe
+
+
+def plot_costs_summary(variants,title=None, key='costs_discounted',base_year= 2025):
+    costs = pd.concat([variant[key].assign(varianta=variant['title'],rok=lambda row: pd.Series(row.index) + base_year) for variant in variants]).set_index(['varianta', 'rok'])
+    
+    soft = costs[['consulting','regional_administration','mop_payment','social_assistence','IT_system']].sum(axis=1)
+    housing = costs[['apartments_yearly_guaranteed','apartments_yearly_municipal','apartments_entry_guaranteed','apartments_entry_municipal']].sum(axis=1)
+    
+    summary = pd.DataFrame({
+        'Náklady měkkých opatření':soft,
+        'Náklady zabydlení':housing,
+        'Náklady bytové nouze':costs.queue_budget
+    })
+    
+    return plot_grouped_stacked(summary,title = title,y_axis_formatter=MLN_FORMATTER)

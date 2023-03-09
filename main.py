@@ -13,9 +13,11 @@ HH_STATUSES = INTERVENTION_TYPES + ['queue'] + [f'outside_{it}' for it in INTERV
 
 def fill_apartment_interventions(yr: int, interventions: pd.Series, apartments: pd.DataFrame, hhs:pd.DataFrame, apartment_type: str, hh_risk: str) -> pd.Series:
     '''
-    Assign `hh_type` households into `apartment_type` apartments for year `yr`. 
+    Assign `hh_risk` households into `apartment_type` apartments for year `yr`. 
 
     All households that can be assigned to available apartments are assigned
+    
+    Records an intervention into `hhs` and `interventions` dataframes.
     '''
 
     # Number of households that are currently waiting for an intervention
@@ -23,14 +25,13 @@ def fill_apartment_interventions(yr: int, interventions: pd.Series, apartments: 
 
     # Number of apartments that were assigned up to this moment (note that no apartment can be used twice)
     apartments_assigned_until_now = interventions.loc[:yr,idx[apartment_type,:]].sum().sum()
+    
     # Derive number of available apartments
     total_stock_of_apartments = apartments.loc[yr,apartment_type] 
     available_apartments = total_stock_of_apartments - apartments_assigned_until_now
 
     assignment = min(available_apartments, hhs_in_need)
 
-    #if (hhs.loc[yr, (apartment_type,hh_risk)] + assignment) < 0:
-    #    pdb.set_trace()
     interventions.loc[yr,(apartment_type, hh_risk)] = assignment
         
     # Remove from queue
@@ -43,7 +44,9 @@ def fill_apartment_interventions(yr: int, interventions: pd.Series, apartments: 
 
 def fill_share_of_queue_intervention(yr: int, interventions: pd.Series, hhs: pd.DataFrame, intervention_shares: pd.DataFrame, hh_risk: str, intervention_type: str) -> pd.Series:
     '''
-    Assign soft/one off interventions coming from social housing system to certain share of households that are currently waiting for an intervention
+    Assign soft `intervention_type` to `hh_risk` households. The share is determined from `intervention_shares`.
+    
+    Records an intervention into `hhs` and `interventions` dataframes.
     '''
 
     # Number of households that are currently waiting for an intervention
@@ -54,37 +57,39 @@ def fill_share_of_queue_intervention(yr: int, interventions: pd.Series, hhs: pd.
     
     # Record interventions
     interventions.loc[yr, (intervention_type, hh_risk)] = intervened
+    
     # Remove from queue
     #last_year = hhs.loc[yr, (intervention_type, hh_risk)] if yr > 0 else 0
     hhs.loc[yr, ('queue', hh_risk)] -= intervened
     
-    #if (hhs.loc[yr, (intervention_type,hh_risk)] + intervened) < 0:
-    #    pdb.set_trace()
-
     hhs.loc[yr, (intervention_type, hh_risk)] += intervened 
     
     return hhs, interventions
 
 def determine_hhs_queue(yr, hhs, returnees, interventions, relapse_rates, years_of_support, hhs_inflow):
+    '''
+    To find how many hhs in queue is going to be on the beginning of year `yr` it is necessary:
     
+        1. To determine number of returnees
+        2. To account for an inflow of new hhs
+        
+    Also number of ongoing interventions is stated on the beginning of each year - that is in later steps adjusted.   
+    '''
     # startyears of interventions that end this year (np.nan if none)
     years_of_interest = (yr - years_of_support).apply(lambda x: x if x >= 0 else np.nan).dropna()
 
     if not years_of_interest.empty:
-        # Find ending interventions - accounting for years of interest nans!
-                
+        # New inflow to queue # TODO check functionality of transfer from if statement below
+        hhs.loc[yr, [('queue',h) for h in HH_RISKS]] = (hhs.loc[yr-1].loc['queue'] + hhs_inflow.loc[HH_RISKS,'yearly_growth']).loc[HH_RISKS].to_list()
+
+        # Find ending interventions - accounting for years of interest nans!       
         ending_interventions = pd.Series(0,index=pd.MultiIndex.from_product([INTERVENTION_TYPES, HH_RISKS], names=('intervention_type', 'hh_risk')))
         ending = interventions[years_of_interest.index].apply(lambda col: col.loc[years_of_interest.loc[col.name[0]]])
         ending_interventions.loc[ending.index] = ending
         
-        # TODO handle error of identifying ongoing intervention when years_of_interest is missing. does not identify any. becase ending
-        
+        # How many interventions are currently in place?
         ongoing_interventions = hhs.loc[yr - 1, ending_interventions.index] - ending_interventions
-        
         hhs.loc[yr, ongoing_interventions.index] = ongoing_interventions
-
-        # New inflow to queue
-        hhs.loc[yr, [('queue',h) for h in HH_RISKS]] = (hhs.loc[yr-1].loc['queue'] + hhs_inflow.loc[HH_RISKS,'yearly_growth']).loc[HH_RISKS].to_list()
 
         # Returnees back to queue
         number_of_returnees = ending_interventions * relapse_rates.unstack().loc[ending_interventions.index]
@@ -95,11 +100,8 @@ def determine_hhs_queue(yr, hhs, returnees, interventions, relapse_rates, years_
         
         # and put the rest outside
         outside_cols = {it: f'outside_{it}' for it in INTERVENTION_TYPES}
-
         new_outside = (ending_interventions - number_of_returnees).rename(outside_cols)
-        
         new_outside.index = new_outside.index.rename(level='intervention_type',names='hh_status')
-
         hhs.loc[yr, outside_cols.values()] = (hhs.loc[yr-1,outside_cols.values()] + new_outside).fillna(0)
         
     return hhs, returnees
@@ -116,31 +118,28 @@ def generate_interventions(
     Generates interventions within the social housing system. 
     
     5 types of interventions are simulated:
-        - `private`: household is assigned to private apartment
+        - `guaranteed`: household is assigned to private guaranteed apartment
         - `municipal`: household is assigned to municipal apartment
-        - `soft`: household is assigned a soft intervention
-        - `consulting_help`: hhs finds a stable housing outside of social housing system
+        - `mop_payment`: household is assigned a mop payment intervention
+        - `consulting`: hhs finds a stable housing outside of social housing system
         - `self_help`: household gets out of housing emergency by other means than social housing system and/or soft intervention
         
-    Interventions are done on three groups of households
+    Interventions are done on two groups of households
         - `low_risk`
         - `high_risk`
-        - `in_danger`
         
     The interventions are computed sequentially, taking into account all of the previous interventions. 
     
     Each year the interventions are done in the following order: 
-    1. Apartment-returnees back to the system (so that they can be intervened)
-    2. Soft interventions returnees back to the system 
-    3. Self-helps (active, inactive)
-    4. Soft interventions (active, inactive)
-    5. Active households to private apartments
-    6. Inactive households to municipal apartments
-    7. Inactive households to private apartments
-    8. Active households to municipal apartments
+        1. Determine hhs and particularly queue (so that they can be intervened)
+        3. Self-helps (separately for high risk and low risks)
+        4. Consultings
+        5. MOPs
+        5. Low risk households to guaranteed apartments
+        6. High risk households to municipal apartments
+        7. High risk households to guaranteed apartments
+        8. Low risk households to municipal apartments
     '''    
-    #phases = ['year_start','new_inflow','new_returnees','before_status_change','year_end']
-    
     # Pregenerate table for households
     hhs = pd.DataFrame(0,index=years, columns=pd.MultiIndex.from_product([HH_STATUSES, HH_RISKS], names=('hh_status', 'hh_risk')),dtype=float)
 
@@ -148,10 +147,11 @@ def generate_interventions(
     interventions = pd.DataFrame(index=years,columns=pd.MultiIndex.from_product([INTERVENTION_TYPES, HH_RISKS], names=('intervention_type', 'hh_risk')),dtype=float)
     returnees = pd.DataFrame(index=years, columns=pd.MultiIndex.from_product([INTERVENTION_TYPES,HH_RISKS], names=('intervention_type', 'hh_risk')),dtype=float)
      
-    #hhs.loc[0, [('total',h) for h in HH_RISKS]] = hhs_inflow.loc[HH_RISKS,'current_level'].to_list()
+    # Assign hhs currently in queue (current level)
     hhs.loc[0, [('queue',h) for h in HH_RISKS]] = hhs_inflow.loc[HH_RISKS,'current_level'].to_list() #hhs.loc[0, [('total',h) for h in HH_RISKS]]
     
     for yr in years:
+        
         # Determine number of households in the queue
         hhs, returnees = determine_hhs_queue(
                 yr = yr,
@@ -162,7 +162,8 @@ def generate_interventions(
                 years_of_support = years_of_support,
                 hhs_inflow = hhs_inflow
             )
-
+        
+        # Assign soft interventions for both low risks and high risks
         for intervention_type in ['self_help','consulting','mop_payment']:
             for hh_risk in HH_RISKS:
                 hhs, interventions = fill_share_of_queue_intervention(
@@ -186,6 +187,11 @@ def generate_interventions(
 
 
 def calculate_costs(interventions, hhs, years_of_support, social_assistences, intervention_costs, discount_rate):
+    '''
+    At the end of the simulation process use simulated interventions to determine costs of the system
+    '''
+    
+    yrs_index = interventions.index
     
     # Number of apartment interventions in given year
     
@@ -197,8 +203,8 @@ def calculate_costs(interventions, hhs, years_of_support, social_assistences, in
     })
 
     # Number of consultings - all interventions in 'guaranteed', 'municipal','consulting','mop_payment'
-    consulting = interventions.loc[:,idx[['guaranteed', 'municipal','consulting','mop_payment'],:]].sum(axis=1).rename('consulting')
-
+    consulting_units = interventions.loc[:,idx[['guaranteed', 'municipal','consulting','mop_payment'],:]].sum(axis=1).rename('consulting')
+    
     # Number of Mops
     mops = interventions.loc[:,idx['mop_payment',:]].sum(axis=1).rename('mop_payment')
 
@@ -215,22 +221,43 @@ def calculate_costs(interventions, hhs, years_of_support, social_assistences, in
     ## Queue units
     queue = hhs.queue.sum(axis=1).rename('queue')
     
-    costs_units = pd.concat([entry_apartments, yearly_apartments, consulting, mops,  yearly_social_assistence,queue],axis=1)
+    # Combine units into a dataframe
+    costs_units = pd.concat([entry_apartments, yearly_apartments, consulting_units, mops,  yearly_social_assistence,queue],axis=1)
+    
+    # Fixed costs for consulting
+    consulting = pd.Series(intervention_costs.loc['yearly','consulting'], index = yrs_index)
+    
+    # Fixed costs for regional administration
+    regional_administration = pd.Series(intervention_costs.loc['yearly','regional_administration'], index = yrs_index)
 
-    # Convert units to costs ("lepení cenovek")
+    # IT system - one-off accounted to the first year
+    fixed_it = pd.Series(0, index = yrs_index)
+    fixed_it.loc[0] = intervention_costs.loc['one_off','IT_system']
+    
+    
+    it_system = pd.DataFrame({
+        # one off costs
+        'one_off': fixed_it,
+        # operational/yearly costs
+        'yearly':pd.Series(intervention_costs.loc['yearly','IT_system'], index = yrs_index)
+    })
+
+    # Convert units to costs ("labelling price tags")
     costs = pd.DataFrame({
+        'IT_system':it_system.sum(axis=1),
         'apartments_yearly_guaranteed': costs_units['apartments_yearly_guaranteed'] * intervention_costs.loc['yearly','guaranteed'],
         'apartments_entry_guaranteed': costs_units['apartments_entry_guaranteed'] * intervention_costs.loc['entry','guaranteed'],
         'apartments_yearly_municipal': costs_units['apartments_yearly_municipal'] * intervention_costs.loc['yearly','municipal'],
         'apartments_entry_municipal': costs_units['apartments_entry_municipal'] * intervention_costs.loc['entry','municipal'],
-        'consulting': costs_units['consulting'] * intervention_costs.loc['entry','consulting'],
+        'consulting': consulting,
+        'regional_administration': regional_administration,
         'mop_payment': costs_units['mop_payment'] * intervention_costs.loc['entry','mop_payment'],
         'social_assistence': costs_units['social_assistance'] * intervention_costs.loc['yearly','social_assistance'],
         'queue_budget': costs_units['queue'] * intervention_costs.loc['yearly','queue_budget'],
         'queue_social': costs_units['queue'] * intervention_costs.loc['yearly','queue_social'],
     })    
 
-
+    # discounting future costs
     costs_discounted = costs.apply(lambda row: row/((1+discount_rate) ** row.name), axis=1)
 
     return costs, costs_units, costs_discounted
@@ -249,8 +276,24 @@ def simulate_social_housing(
     intervention_costs,
     discount_rate,
     years,
-    title
+    title=None
 ):
+    '''
+    An entering function into model. If not interested in breaking the model to pieces, you most likely want to use this function.
+    
+    Accepts all parameters (or dict to be decomposed by `**kwargs`)
+    
+    Procedure: 
+        1. Simulation of apartments stock (in LEVELS)
+        2. Generates all interventions
+        3. Calculate costs
+        
+    Returns dataframes with relevant outputs:
+        * `interventions` contain assigned interventions in each year
+        * `hhs` contains status of hhs in given year
+        * `
+    
+    '''
     apartments = simulate_apartment_stock(
         guaranteed_yearly_apartments=guaranteed_yearly_apartments,
         municipal_apartments_today = municipal_apartments_today,
@@ -278,4 +321,12 @@ def simulate_social_housing(
         discount_rate=discount_rate
     )
     
-    return interventions, hhs, returnees, costs, costs_units, costs_discounted
+    return {
+        'interventions':interventions,
+        'hhs':hhs,
+        'returnees':returnees,
+        'costs':costs,
+        'costs_units':costs_units, 
+        'costs_discounted':costs_discounted,
+        'title':title
+    }
