@@ -42,31 +42,33 @@ def fill_apartment_interventions(yr: int, interventions: pd.Series, apartments: 
     
     return interventions, hhs
 
-def fill_share_of_queue_intervention(yr: int, interventions: pd.Series, hhs: pd.DataFrame, intervention_shares: pd.DataFrame, hh_risk: str, intervention_type: str) -> pd.Series:
+def fill_share_of_queue_interventions(yr: int, interventions: pd.Series, hhs: pd.DataFrame, intervention_shares: pd.DataFrame, hh_risks, intervention_types) -> pd.Series:
     '''
     Assign soft `intervention_type` to `hh_risk` households. The share is determined from `intervention_shares`.
     
     Records an intervention into `hhs` and `interventions` dataframes.
     '''
-
+    if (intervention_shares.sum(axis=1) > 1).any():
+        raise Exception('Intervention shares cannot sum above 100% in one hh group...')
+    
     # Number of households that are currently waiting for an intervention
-    hhs_in_need = hhs.loc[yr, ('queue', hh_risk)]
+    hhs_in_need = hhs.loc[yr, 'queue']
     
     # number of hhs to receive queue intervention
-    intervened = hhs_in_need * intervention_shares.loc[hh_risk, intervention_type]
+    intervened = (hhs_in_need * intervention_shares.T).stack()
     
     # Record interventions
-    interventions.loc[yr, (intervention_type, hh_risk)] = intervened
+    interventions.loc[yr, intervened.index] = intervened
     
     # Remove from queue
-    #last_year = hhs.loc[yr, (intervention_type, hh_risk)] if yr > 0 else 0
-    hhs.loc[yr, ('queue', hh_risk)] -= intervened
+    hhs.loc[yr, [('queue',hh_risk) for hh_risk in HH_RISKS]] -= intervened.unstack(1).sum().loc[HH_RISKS].to_list()
     
-    hhs.loc[yr, (intervention_type, hh_risk)] += intervened 
+    # Record hhs interventions
+    hhs.loc[yr, intervened.index] += intervened 
     
     return hhs, interventions
 
-def determine_hhs_queue(yr, hhs, returnees, interventions, relapse_rates, years_of_support, hhs_inflow):
+def determine_hhs_queue(yr, hhs, returnees, interventions, relapse_rates, years_of_support, hhs_inflow, low_to_high_risk_share):
     '''
     To find how many hhs in queue is going to be on the beginning of year `yr` it is necessary:
     
@@ -79,8 +81,20 @@ def determine_hhs_queue(yr, hhs, returnees, interventions, relapse_rates, years_
     years_of_interest = (yr - years_of_support).apply(lambda x: x if x >= 0 else np.nan).dropna()
 
     if not years_of_interest.empty:
+        # Some low risks in queue are now high-risks
+        #pdb.set_trace()
+        old_queue = hhs.loc[yr-1].loc['queue'] 
+        new_queue = old_queue.copy()
+        
+        old_queue_risk_transfer = old_queue.loc['low'] * low_to_high_risk_share
+        
+
+        new_queue.loc['low'] -= old_queue_risk_transfer
+        new_queue.loc['high'] += old_queue_risk_transfer
+        
+            
         # New inflow to queue # TODO check functionality of transfer from if statement below
-        hhs.loc[yr, [('queue',h) for h in HH_RISKS]] = (hhs.loc[yr-1].loc['queue'] + hhs_inflow.loc[HH_RISKS,'yearly_growth']).loc[HH_RISKS].to_list()
+        hhs.loc[yr, [('queue',h) for h in HH_RISKS]] = (new_queue.loc[HH_RISKS] + hhs_inflow.loc[HH_RISKS,'yearly_growth']).loc[HH_RISKS].to_list()
 
         # Find ending interventions - accounting for years of interest nans!       
         ending_interventions = pd.Series(0,index=pd.MultiIndex.from_product([INTERVENTION_TYPES, HH_RISKS], names=('intervention_type', 'hh_risk')))
@@ -91,12 +105,19 @@ def determine_hhs_queue(yr, hhs, returnees, interventions, relapse_rates, years_
         ongoing_interventions = hhs.loc[yr - 1, ending_interventions.index] - ending_interventions
         hhs.loc[yr, ongoing_interventions.index] = ongoing_interventions
 
+
         # Returnees back to queue
         number_of_returnees = ending_interventions * relapse_rates.unstack().loc[ending_interventions.index]
         returnees.loc[yr] = number_of_returnees
+        #hhs.loc[yr, ('queue','high')] = hhs.loc[yr, ('queue','high')] + number_of_returnees.sum() 
         
-        # All returnees are high risks
-        hhs.loc[yr, ('queue','high')] = hhs.loc[yr, ('queue','high')] + number_of_returnees.sum() 
+        returnees_to_queue = number_of_returnees.unstack('hh_risk').sum()
+        returnees_risk_transfer = returnees_to_queue.loc['low'] * low_to_high_risk_share
+        
+        returnees_to_queue.loc['low'] -= returnees_risk_transfer
+        returnees_to_queue.loc['high'] += returnees_risk_transfer
+        
+        hhs.loc[yr, [('queue',h) for h in HH_RISKS]] += returnees_to_queue        
         
         # and put the rest outside
         outside_cols = {it: f'outside_{it}' for it in INTERVENTION_TYPES}
@@ -112,6 +133,7 @@ def generate_interventions(
     intervention_shares: pd.DataFrame,
     hhs_inflow: pd.DataFrame,
     years_of_support: pd.Series,
+    low_to_high_risk_share: float,
     years: np.ndarray
 ) -> pd.DataFrame:
     '''
@@ -151,7 +173,6 @@ def generate_interventions(
     hhs.loc[0, [('queue',h) for h in HH_RISKS]] = hhs_inflow.loc[HH_RISKS,'current_level'].to_list() #hhs.loc[0, [('total',h) for h in HH_RISKS]]
     
     for yr in years:
-        
         # Determine number of households in the queue
         hhs, returnees = determine_hhs_queue(
                 yr = yr,
@@ -160,20 +181,19 @@ def generate_interventions(
                 interventions = interventions, 
                 relapse_rates = relapse_rates, 
                 years_of_support = years_of_support,
-                hhs_inflow = hhs_inflow
+                hhs_inflow = hhs_inflow,
+                low_to_high_risk_share = low_to_high_risk_share
             )
         
         # Assign soft interventions for both low risks and high risks
-        for intervention_type in ['self_help','consulting','mop_payment']:
-            for hh_risk in HH_RISKS:
-                hhs, interventions = fill_share_of_queue_intervention(
-                    yr = yr, 
-                    interventions = interventions,
-                    hhs = hhs,
-                    intervention_shares = intervention_shares,
-                    hh_risk = hh_risk, 
-                    intervention_type = intervention_type
-                )
+        hhs, interventions = fill_share_of_queue_interventions(
+            yr = yr, 
+            interventions = interventions,
+            hhs = hhs,
+            intervention_shares = intervention_shares,
+            hh_risks = HH_RISKS, 
+            intervention_types = ['self_help','consulting','mop_payment']
+        )
                 
         # Priority assignments of apartments
         interventions, hhs = fill_apartment_interventions(yr, interventions, apartments, hhs, 'guaranteed', 'low')
@@ -182,7 +202,7 @@ def generate_interventions(
         # Secondary assignments of apartments
         interventions, hhs = fill_apartment_interventions(yr, interventions, apartments, hhs, 'guaranteed', 'high')
         interventions, hhs = fill_apartment_interventions(yr, interventions, apartments, hhs, 'municipal', 'low')
-        
+        #pdb.set_trace()
     return interventions, hhs, returnees
 
 
@@ -209,10 +229,10 @@ def calculate_costs(interventions, hhs, years_of_support, social_assistences, in
     mops = interventions.loc[:,idx['mop_payment',:]].sum(axis=1).rename('mop_payment')
 
     # Number of social assistnces - defined by social_assistences table
-    yearly_social_assistence = (entry_apartments.join(mops) * social_assistences.share)
-    yearly_social_assistence = pd.DataFrame({
-        col: (yearly_social_assistence[col]).rolling(int(social_assistences.years.loc[col]), min_periods=1).sum() for col in ['guaranteed', 'mop_payment','municipal']
-    }).sum(axis=1).rename('social_assistance')
+    social_assistence_breakdown = (entry_apartments.join(mops) * social_assistences.share)
+    social_assistence_breakdown = pd.DataFrame({
+        col: (social_assistence_breakdown[col]).rolling(int(social_assistences.years.loc[col]), min_periods=1).sum() for col in ['guaranteed', 'mop_payment','municipal']
+    })
 
     # Rename columns
     entry_apartments.columns = [f'apartments_entry_{col}' for col in entry_apartments.columns]
@@ -222,11 +242,12 @@ def calculate_costs(interventions, hhs, years_of_support, social_assistences, in
     queue = hhs.queue.sum(axis=1).rename('queue')
     
     # Combine units into a dataframe
-    costs_units = pd.concat([entry_apartments, yearly_apartments, consulting_units, mops,  yearly_social_assistence,queue],axis=1)
+    costs_units = pd.concat([entry_apartments, yearly_apartments, consulting_units, mops,  social_assistence_breakdown.sum(axis=1).rename('social_assistance'),queue],axis=1)
     
     # Fixed costs for consulting
     consulting = pd.Series(intervention_costs.loc['yearly','consulting'], index = yrs_index)
-    
+    consulting.iloc[0] += intervention_costs.loc['one_off','consulting']
+
     # Fixed costs for regional administration
     regional_administration = pd.Series(intervention_costs.loc['yearly','regional_administration'], index = yrs_index)
 
@@ -260,7 +281,7 @@ def calculate_costs(interventions, hhs, years_of_support, social_assistences, in
     # discounting future costs
     costs_discounted = costs.apply(lambda row: row/((1+discount_rate) ** row.name), axis=1)
 
-    return costs, costs_units, costs_discounted
+    return costs, costs_units, costs_discounted, social_assistence_breakdown
 
 def simulate_social_housing(
     guaranteed_yearly_apartments,
@@ -275,7 +296,10 @@ def simulate_social_housing(
     social_assistences,
     intervention_costs,
     discount_rate,
+    low_to_high_risk_share,
+    before_start_intervention_shares,
     years,
+    base_year=2025,
     title=None
 ):
     '''
@@ -309,10 +333,12 @@ def simulate_social_housing(
         intervention_shares = intervention_shares,
         hhs_inflow =hhs_inflow,
         years_of_support = years_of_support,
+        low_to_high_risk_share = low_to_high_risk_share,
         years = years
     )
     
-    costs, costs_units, costs_discounted = calculate_costs(
+    
+    costs, costs_units, costs_discounted, social_assistence_breakdown = calculate_costs(
         interventions=interventions,
         hhs = hhs,
         years_of_support=years_of_support,
@@ -321,12 +347,21 @@ def simulate_social_housing(
         discount_rate=discount_rate
     )
     
+    interventions.index = (interventions.index + base_year).rename('rok')
+    hhs.index = (hhs.index + base_year).rename('rok')
+    returnees.index = (returnees.index + base_year).rename('rok')
+    
+    costs.index = (costs.index + base_year).rename('rok')
+    costs_units.index = (costs_units.index + base_year).rename('rok')
+    costs_discounted.index = (costs_discounted.index + base_year).rename('rok')
+    social_assistence_breakdown.index = (social_assistence_breakdown.index + base_year).rename('rok')
     return {
         'interventions':interventions,
-        'hhs':hhs,
+        'hhs':hhs.sort_index(),
         'returnees':returnees,
         'costs':costs,
         'costs_units':costs_units, 
         'costs_discounted':costs_discounted,
+        'social_assistence_breakdown':social_assistence_breakdown,
         'title':title
     }

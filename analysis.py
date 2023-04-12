@@ -4,11 +4,12 @@ from matplotlib import pyplot as plt
 import matplotlib.colors as mc
 from main import simulate_social_housing
 from matplotlib.ticker import FuncFormatter
-
+from matplotlib.ticker import PercentFormatter
 from main import simulate_social_housing
-
-CUSTOM_COLORS = [tuple(list(mc.to_rgb(c)) + [alpha]) for c in ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd'] for alpha in (.5,1)]   
+COLOR_PALETTE = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
+CUSTOM_COLORS = [tuple(list(mc.to_rgb(c)) + [alpha]) for c in COLOR_PALETTE for alpha in (.5,1)]   
 MLN_FORMATTER = FuncFormatter(lambda x, pos: f'{round(x/1000000)} mln. Kč')
+PCT_FORMATTER = FuncFormatter(lambda x, pos: f'{round(x*100)} %')
 
 def plot_interventions(interventions, title='Počet podpořených domácností v daném roce', ax=None, figsize=(12,6), ylim=None):
     colmap = {
@@ -21,7 +22,7 @@ def plot_interventions(interventions, title='Počet podpořených domácností v
 
     df = interventions.groupby('intervention_type',axis=1).sum().rename(columns=colmap)
     
-    return df[colmap.values()].plot.bar(stacked=True, title=title, grid=True, figsize=figsize,color=CUSTOM_COLORS[1::2],ax=ax, ylim=ylim)
+    return df[colmap.values()].plot.bar(title=title, grid=True, figsize=figsize,color=CUSTOM_COLORS[1::2],ax=ax, ylim=ylim)
     
 def plot_hhs(hhs, title='Rozdělení domácností do segmentů', shares = False, ax = None, figsize=(12,6), ylim=None):
     df = hhs.groupby('hh_status',axis=1).sum()
@@ -41,14 +42,27 @@ def plot_hhs(hhs, title='Rozdělení domácností do segmentů', shares = False,
         'Vyřešeno - obecní bydlení': df.outside_municipal
     }).plot.bar(stacked=True, figsize=figsize, grid=True, title=title,ax=ax, color=CUSTOM_COLORS[1::2] + [CUSTOM_COLORS[2],CUSTOM_COLORS[4],CUSTOM_COLORS[6],CUSTOM_COLORS[8]], ylim=ylim);
        
-def plot_costs(costs, title='Přímé náklady intervencí sociálního bydlení',ax=None, include_queue_budget=True, include_queue_social=False, figsize=(12,6), ylim=None):
+def plot_costs(costs, title='Přímé náklady intervencí sociálního bydlení',ax=None, include_queue_budget=True, include_queue_social=False, figsize=(12,6), ylim=None,rot=0):
     
-    df = costs.copy()
+    #df = costs.copy()
 
+    df = pd.DataFrame({
+        'Byty s garancí pro majitele': costs.apartments_yearly_guaranteed + costs.apartments_entry_guaranteed,
+        'Obecní bydlení pro CS': costs.apartments_yearly_municipal + costs.apartments_entry_municipal,
+        'Poradenství': costs.consulting,
+        'Vyplacené MOP': costs.mop_payment,
+        'Asistence v bydlení': costs.social_assistence,
+        'IT systém': costs.IT_system,
+        'Náklady na výkon veřejné správy': costs.regional_administration,
+        'Rozpočtové náklady bytové nouze':costs.queue_budget,
+        'Společenské náklady bytové nouze':costs.queue_social
+    })
+    
+    
     if not include_queue_budget:
-        df = df.drop('queue_budget',axis=1)
+        df = df.drop('Rozpočtové náklady bytové nouze',axis=1)
     if not include_queue_social:
-        df = df.drop('queue_social',axis=1)
+        df = df.drop('Společenské náklady bytové nouze',axis=1)
     
     colmap = {
         'apartments_yearly_guaranteed': 'Garantované bydlení - průběžné',
@@ -63,10 +77,10 @@ def plot_costs(costs, title='Přímé náklady intervencí sociálního bydlení
         'IT_system':'Náklady na IT systém',
         'regional_administration':'Náklady veřejné správy'
     }
-    
-    
-    ax = df.rename(columns=colmap).plot.bar(stacked=True, grid=True, title=title, figsize=figsize,color=CUSTOM_COLORS[:len(costs.columns)-2] + ['gray','lightgray'],ax=ax,ylim=ylim)
-    ax.yaxis.set_major_formatter(MLN_FORMATTER);
+        
+    ax = df.plot.bar(stacked=True, grid=True, title=title, figsize=figsize,color=plt.rcParams['axes.prop_cycle'].by_key()['color'][:len(df.columns)-1] + ['gray'],ax=ax,ylim=ylim,rot=rot)
+    ax.yaxis.set_major_formatter(MLN_FORMATTER)
+    ax.set_xlabel('')
     
     return ax
 
@@ -129,7 +143,7 @@ def plot_4_variants(tables_1A, tables_1B, tables_2A, tables_2B, plot_function = 
         return fig, axs
 
 
-def compare_variants(output_1, output_2, ylim_costs=(0,4000000000), ylim_interventions=(0, 25000), ylim_hhs=(0,150000),discount_costs=True):
+def compare_variants(output_1, output_2, ylim_costs=(0,5000000000), ylim_interventions=(0, 25000), ylim_hhs=(0,200000),discount_costs=True):
     
     fig, axs = plt.subplots(nrows=3, ncols=2,figsize=(15, 10),sharex=True,sharey=False)
     fig.subplots_adjust(right=0.8)
@@ -175,7 +189,7 @@ def save_tables_to_excel(tbl_dicts, excel_file):
         #pd.concat([tbl_dicts[key]['costs_discounted'].assign(variant=key) for key in tbl_dicts]).to_excel(writer, sheet_name='costs_discounted')
 
 
-def plot_grouped_stacked(df, title='', y_axis_formatter = None, reverse_alphas=False):
+def plot_grouped_stacked(df, title='', y_axis_formatter = None, reverse_alphas=False,ylim=None, color_leg_loc=[0.65, 0.62], alpha_leg_loc=[0.4,0.75]):
     variant_names = list(df.index.get_level_values('varianta').unique())
     col_names = list(df.columns)
     ind_names = list(df.index.get_level_values('rok').unique())
@@ -217,7 +231,8 @@ def plot_grouped_stacked(df, title='', y_axis_formatter = None, reverse_alphas=F
             linewidth=0,
             color = [rgb + (alpha,) for alpha in alphas],
             legend=False,
-            grid=True
+            grid=True,
+            fontsize=15,rot=0,ylim=ylim
         )
     h,l = axe.get_legend_handles_labels() # get the handles we want to modify
     for i in range(0, n_df * n_col, n_col): # len(h) = n_col * n_df
@@ -237,28 +252,76 @@ def plot_grouped_stacked(df, title='', y_axis_formatter = None, reverse_alphas=F
 
     # Add invisible data to add variant legend
     n1 = [axe.bar(0, 0, color=rgb_colors[i] ) for i in range(n_df)]
-    l1 = axe.legend(n1, variant_names, loc=[1.01, 0.1]) 
+    color_leg = axe.legend(n1, variant_names, loc=color_leg_loc,fontsize=15) 
     
     n2 = [axe.bar(0, 0, color=(0,0,0) + (alphas[i],) ) for i in range(n_col)]
-    l2 = axe.legend(n2, list(df.columns), loc=[1.01, 0.5])
+    alpha_leg = axe.legend(n2, list(df.columns), loc=alpha_leg_loc,fontsize=15)
 
     # Add invisible data to add columns legend
-    axe.add_artist(l1)
-    axe.add_artist(l2)
+    axe.add_artist(color_leg)
+    axe.add_artist(alpha_leg)
     
     return axe
 
 
-def plot_costs_summary(variants,title=None, key='costs_discounted',base_year= 2025):
-    costs = pd.concat([variant[key].assign(varianta=variant['title'],rok=lambda row: pd.Series(row.index) + base_year) for variant in variants]).set_index(['varianta', 'rok'])
+
+def get_costs_summary(variants, key='costs_discounted'):
+    costs = pd.concat([variant[key].assign(varianta=variant['title']) for variant in variants]).reset_index().set_index(['varianta', 'rok'])
     
     soft = costs[['consulting','regional_administration','mop_payment','social_assistence','IT_system']].sum(axis=1)
     housing = costs[['apartments_yearly_guaranteed','apartments_yearly_municipal','apartments_entry_guaranteed','apartments_entry_municipal']].sum(axis=1)
     
-    summary = pd.DataFrame({
+    return pd.DataFrame({
         'Náklady měkkých opatření':soft,
         'Náklady zabydlení':housing,
         'Náklady bytové nouze':costs.queue_budget
     })
+
+def plot_costs_summary(variants,title=None, key='costs_discounted'):
     
-    return plot_grouped_stacked(summary,title = title,y_axis_formatter=MLN_FORMATTER)
+    summary = get_costs_summary(variants, key)
+    return plot_grouped_stacked(summary,title = title,y_axis_formatter=MLN_FORMATTER,ylim=(0,7000000000))
+
+
+def plot_hhs_in_emergency(variants, title='Počet domácností v bytové nouzi', visualize_risk_structure=False):
+    
+    def get_hhs_in_emergency(hhs, variant_title):
+        return  hhs.assign(varianta=variant_title).rename({'low':'Nízké riziko','high':'Vysoké riziko'},axis=1)
+        
+    summary = pd.concat([get_hhs_in_emergency(variant['hhs'],variant['title']) for variant in variants]).reset_index().set_index(['varianta', 'rok'])[['guaranteed','municipal','mop_payment','self_help','consulting','queue']]#.sum(axis=1)
+    #ax = summary.unstack('varianta').plot.bar(figsize=(20,6),title=title,grid=True,fontsize=15,rot=0)
+    if visualize_risk_structure:
+        ax = plot_grouped_stacked(summary.stack('hh_risk').sum(axis=1).unstack('hh_risk'),title = title)
+        return ax
+    else:
+        ax = summary.sum(axis=1).unstack('varianta').plot.line(figsize=(20,6),grid=True,ylim=(0,100000),xlabel='',title=title,fontsize=15)
+        ax.legend(fontsize=15)
+        return ax
+
+
+
+
+def get_intervention_costs(model_output, base_year=2025, costs_type='costs_discounted'):
+    df = model_output[costs_type]
+    return pd.DataFrame({
+        'Byty s garancí pro majitele (náklady na aktuálně podporované byty)': df.apartments_yearly_guaranteed + df.apartments_entry_guaranteed,
+        'Obecní byty pro CS (náklady na aktuálně podporované byty)':  df.apartments_yearly_municipal + df.apartments_entry_municipal,
+        'Poradenství': df.consulting,
+        'Vyplacené MOP': df.mop_payment,
+        'Asistence v bydlení': df.social_assistence,
+        'IT systém': df.IT_system,
+        'Náklady na výkon veřejné správy': df.regional_administration
+    })
+def plot_interventions_costs(model_output, title, base_year=2025, costs_type='costs_discounted',ax=None,legend=True):
+    
+    df = get_intervention_costs(model_output, base_year, costs_type)
+    
+    ax = df.plot.area(
+        grid=True,
+        figsize=(12,6),
+        title=title,
+        ax=ax,legend=legend
+    )
+    
+    ax.yaxis.set_major_formatter(MLN_FORMATTER)
+    return ax
