@@ -176,7 +176,7 @@ def compare_variants(output_1, output_2, ylim_costs=(0,5000000000), ylim_interve
 
 def save_tables_to_excel(tbl_dicts, excel_file):
     
-    tables = ['interventions','returnees','hhs','costs','costs_units','costs_discounted']
+    tables = ['interventions','returnees','hhs','costs','costs_units','costs_discounted', 'social_assistence_breakdown']
 
     with pd.ExcelWriter(excel_file) as writer:  
         for table in tables:
@@ -312,14 +312,14 @@ def get_intervention_costs(model_output, base_year=2025, costs_type='costs_disco
         'IT systém': df.IT_system,
         'Náklady na výkon veřejné správy': df.regional_administration
     })
-def plot_interventions_costs(model_output, title, base_year=2025, costs_type='costs_discounted',ax=None,legend=True):
+def plot_interventions_costs(model_output, base_year=2025, costs_type='costs',ax=None,legend=True):
     
     df = get_intervention_costs(model_output, base_year, costs_type)
     
     ax = df.plot.area(
         grid=True,
         figsize=(12,6),
-        title=title,
+        title=model_output['title'],
         ax=ax,legend=legend
     )
     

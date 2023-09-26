@@ -27,6 +27,7 @@ def fill_apartment_interventions(yr: int, interventions: pd.Series, apartments: 
     apartments_assigned_until_now = interventions.loc[:yr,idx[apartment_type,:]].sum().sum()
     
     # Derive number of available apartments
+
     total_stock_of_apartments = apartments.loc[yr,apartment_type] 
     available_apartments = total_stock_of_apartments - apartments_assigned_until_now
 
@@ -42,7 +43,7 @@ def fill_apartment_interventions(yr: int, interventions: pd.Series, apartments: 
     
     return interventions, hhs
 
-def fill_share_of_queue_interventions(yr: int, interventions: pd.Series, hhs: pd.DataFrame, intervention_shares: pd.DataFrame, hh_risks, intervention_types) -> pd.Series:
+def fill_share_interventions(yr: int, interventions: pd.Series, hhs: pd.DataFrame, intervention_shares: pd.DataFrame, hh_risks, intervention_types, startup_coefficients: pd.Series,hhs_inflow: pd.DataFrame, ) -> pd.Series:
     '''
     Assign soft `intervention_type` to `hh_risk` households. The share is determined from `intervention_shares`.
     
@@ -52,10 +53,17 @@ def fill_share_of_queue_interventions(yr: int, interventions: pd.Series, hhs: pd
         raise Exception('Intervention shares cannot sum above 100% in one hh group...')
     
     # Number of households that are currently waiting for an intervention
-    hhs_in_need = hhs.loc[yr, 'queue']
+    #if yr == 0:
+    eligible_hhs = hhs.loc[yr, 'queue']
+    #else:
+    #   eligible_hhs = hhs_inflow.yearly_growth
+        
+    real_intervention_shares = intervention_shares.copy()
+    if yr in (startup_coefficients.index):
+        real_intervention_shares[startup_coefficients.columns] = intervention_shares[startup_coefficients.columns] * startup_coefficients.loc[yr]
     
     # number of hhs to receive queue intervention
-    intervened = (hhs_in_need * intervention_shares.T).stack()
+    intervened = (eligible_hhs * real_intervention_shares.T).stack()
     
     # Record interventions
     interventions.loc[yr, intervened.index] = intervened
@@ -134,6 +142,7 @@ def generate_interventions(
     hhs_inflow: pd.DataFrame,
     years_of_support: pd.Series,
     low_to_high_risk_share: float,
+    startup_coefficients: pd.DataFrame,
     years: np.ndarray
 ) -> pd.DataFrame:
     '''
@@ -186,13 +195,15 @@ def generate_interventions(
             )
         
         # Assign soft interventions for both low risks and high risks
-        hhs, interventions = fill_share_of_queue_interventions(
+        hhs, interventions = fill_share_interventions(
             yr = yr, 
             interventions = interventions,
             hhs = hhs,
             intervention_shares = intervention_shares,
             hh_risks = HH_RISKS, 
-            intervention_types = ['self_help','consulting','mop_payment']
+            intervention_types = ['self_help','consulting','mop_payment'],
+            startup_coefficients = startup_coefficients[['consulting','mop_payment']],
+            hhs_inflow = hhs_inflow,
         )
                 
         # Priority assignments of apartments
@@ -206,7 +217,7 @@ def generate_interventions(
     return interventions, hhs, returnees
 
 
-def calculate_costs(interventions, hhs, years_of_support, social_assistences, intervention_costs, discount_rate):
+def calculate_costs(interventions, hhs, years_of_support, social_assistences, intervention_costs, discount_rate, mop_housing_share):
     '''
     At the end of the simulation process use simulated interventions to determine costs of the system
     '''
@@ -227,9 +238,12 @@ def calculate_costs(interventions, hhs, years_of_support, social_assistences, in
     
     # Number of Mops
     mops = interventions.loc[:,idx['mop_payment',:]].sum(axis=1).rename('mop_payment')
-
+    housing_mops = interventions[['guaranteed','municipal']].apply(lambda col: col * mop_housing_share.loc[col.name[0],col.name[1]]).sum(axis=1).rename('mop_payment')
+    mops = mops + housing_mops
+    
     # Number of social assistnces - defined by social_assistences table
-    social_assistence_breakdown = (entry_apartments.join(mops) * social_assistences.share)
+    social_assistence_breakdown = (entry_apartments.join(mops-housing_mops) * social_assistences.share)
+
     social_assistence_breakdown = pd.DataFrame({
         col: (social_assistence_breakdown[col]).rolling(int(social_assistences.years.loc[col]), min_periods=1).sum() for col in ['guaranteed', 'mop_payment','municipal']
     })
@@ -298,6 +312,8 @@ def simulate_social_housing(
     discount_rate,
     low_to_high_risk_share,
     before_start_intervention_shares,
+    startup_coefficients,
+    mop_housing_share,
     years,
     base_year=2025,
     title=None
@@ -324,6 +340,7 @@ def simulate_social_housing(
         municipal_yearly_new_apartments = municipal_yearly_new_apartments,
         municipal_existing_availability_rate = municipal_existing_availability_rate,
         municipal_new_availability_rate = municipal_new_availability_rate,
+        startup_coefficients = startup_coefficients[['guaranteed','municipal']],
         years=years,
     )
     
@@ -334,6 +351,7 @@ def simulate_social_housing(
         hhs_inflow =hhs_inflow,
         years_of_support = years_of_support,
         low_to_high_risk_share = low_to_high_risk_share,
+        startup_coefficients = startup_coefficients,
         years = years
     )
     
@@ -344,7 +362,8 @@ def simulate_social_housing(
         years_of_support=years_of_support,
         social_assistences=social_assistences,
         intervention_costs=intervention_costs,
-        discount_rate=discount_rate
+        discount_rate=discount_rate,
+        mop_housing_share=mop_housing_share
     )
     
     interventions.index = (interventions.index + base_year).rename('rok')
