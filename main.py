@@ -311,7 +311,6 @@ def simulate_social_housing(
     intervention_costs,
     discount_rate,
     low_to_high_risk_share,
-    before_start_intervention_shares,
     startup_coefficients,
     mop_housing_share,
     years,
